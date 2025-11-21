@@ -9,6 +9,7 @@ import { StatusCodes } from 'http-status-codes';
 // import { Server } from 'socket.io';
  import logger from './lib/logger';
 import { logInfo, responseValidation } from './lib';
+import crawler from './service/scrapper';
 
 dotenv.config();
 
