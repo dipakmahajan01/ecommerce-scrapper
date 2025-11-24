@@ -1,18 +1,52 @@
 import { Request, Response } from "express";
-import crawler from "../service/scrapper";
+import { parseUserQueryWithAI } from "../helpers/aiParser";
+import { parseUserQuery as parseUserQueryFallback } from "../helpers/nlp";
+import { buildFlipkartSearchUrl } from "../helpers/flipkart";
+import { scrapeFlipkartSearch } from "../service/scrapper";
+
 
 
 
 
 export const getProductList = async (req:Request, res:Response) => {
-   try{
-   const {search} = req.query;
-   const url = `https://www.flipkart.com/search?q=${encodeURIComponent(search as string)} `
-   const data = await crawler.run([url]);
-   return res.status(200).json({data});
-   }catch(err){
-     console.log('Error in getProductList:', err);
-     return res.status(500).json({ error: 'Internal Server Error' });
-   }
+ const userQuery = (req.query.query as string) || "";
 
-}
+  if (!userQuery) {
+    return res.status(400).json({ error: "Missing 'query' parameter" });
+  }
+
+  try {
+    // 1) Use AI model to extract structure. If AI fails (model not available), fall back to local NLP.
+    let parsed;
+    try {
+      parsed = await parseUserQueryWithAI(userQuery);
+    } catch (aiErr: any) {
+      console.error('[product] AI parse failed, falling back to local NLP parser:', aiErr?.message || aiErr);
+      parsed = parseUserQueryFallback(userQuery);
+    }
+
+    // 2) Use productKeywords to build Flipkart URL
+    const flipkartUrl = buildFlipkartSearchUrl({
+      raw: userQuery,
+      productKeywords: parsed.productKeywords,
+      maxPrice: parsed.maxPrice ?? undefined,
+      minPrice: parsed.minPrice ?? undefined,
+    });
+
+    // 3) Scrape and return JSON
+    const products = await scrapeFlipkartSearch(flipkartUrl);
+
+    return res.json({
+      query: {
+        raw: userQuery,
+        ...parsed,
+      },
+      flipkartUrl,
+      count: products.length,
+      products,
+    });
+  } catch (err: any) {
+    console.log("err",err);
+    return res.status(500).json({ error: "Failed to parse query or scrape Flipkart" });
+  }
+};

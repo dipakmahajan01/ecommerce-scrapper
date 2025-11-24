@@ -1,23 +1,59 @@
-import { PuppeteerCrawler, Dataset } from 'crawlee';
+// src/scraper.ts
+import { CheerioCrawler, Dataset } from "crawlee";
 
-// PuppeteerCrawler crawls the web using a headless
-// browser controlled by the Puppeteer library.
-const crawler = new PuppeteerCrawler({
-    // Use the requestHandler to process each of the crawled pages.
-    async requestHandler({ request, page, enqueueLinks, log }) {
-        const title = await page.title();
+export interface Product {
+  title: string | null;
+  price: string | null;
+  description: string | null;
+  link: string | null;
+  image: string | null;
+  rating: string | null;
+}
 
-        // Save results as JSON to ./storage/datasets/default
-        // await Dataset.pushData({ title, url: request.loadedUrl });
+export async function scrapeFlipkartSearch(url: string): Promise<Product[]> {
+  const results: Product[] = [];
 
-        // Extract links from the current page
-        // and add them to the crawling queue.
-        // await enqueueLinks();
-    },
-    // Uncomment this option to see the browser window.
-    // headless: false,
-
-    // Let's limit our crawls to make our tests shorter and safer.
+  const crawler = new CheerioCrawler({
     maxRequestsPerCrawl: 1,
-});
-export default crawler;
+    requestHandler: async ({ $ }) => {
+      const productCards = $("div[data-id]");
+      productCards.each((_, el) => {
+        const card = $(el);
+
+        const title = card.find("div.KzDlHZ").first().text().trim() || null;
+        const linkElem = card.find("a.CGtC98").first();
+        const relativeHref = linkElem.attr("href");
+        const link = relativeHref
+          ? "https://www.flipkart.com" + relativeHref
+          : null;
+        const image =
+          card.find("img.DByuf4").attr("src") ||
+          card.find("img.DByuf4").attr("data-src") ||
+          null;
+        const price = card.find("div.Nx9bqj").first().text().trim() || null;
+        const rating =
+          card.find("div.XQDdHH").first().text().trim() ||
+          card.find("span.Y1HWO0").first().text().trim() ||
+          null;
+        const details:any = [];
+        card.find("ul.G4BRas li.Jigdf").each((_, li) => {
+          details.push($(li).text().trim());
+        });
+        const description = details.join(" | ") || null;
+
+        results.push({
+          title,
+          price,
+          description,
+          link,
+          image,
+          rating,
+        });
+      });
+    },
+  });
+
+  await crawler.run([url]);
+  return results;
+}
+

@@ -9,7 +9,11 @@ import { StatusCodes } from 'http-status-codes';
 // import { Server } from 'socket.io';
  import logger from './lib/logger';
 import { logInfo, responseValidation } from './lib';
-import crawler from './service/scrapper';
+import productRoutes from './routes/product/routes';
+import { scrapeProcessorTable } from './service/mobileDetails';
+import { crawlAllRows } from './service/mobileDetailsData';
+// import run from './service/scrapper';
+// import crawler from './service/scrapper';
 
 dotenv.config();
 
@@ -58,6 +62,8 @@ const health = (req: Request, res: Response) => {
 };
 
 app.get('/', health);
+
+app.use('/api/products',productRoutes);
 app.use((req: Request, res: Response) => {
   return res
     .status(StatusCodes.INTERNAL_SERVER_ERROR)
@@ -77,6 +83,18 @@ app.use((error: any, req: Request, res: Response) => {
   );
 });
 
+// run().catch((err) => {
+//     console.error(err);
+//     process.exit(1);
+// });
+scrapeProcessorTable("https://nanoreview.net/en/soc-list/rating").catch((err) => {
+    console.error(err);
+    process.exit(1);
+});
+crawlAllRows('https://nanoreview.net/en/soc-list/rating').catch((err) => {
+    console.error(err);
+    process.exit(1);
+});
 process.on('unhandledRejection', function (reason, promise) {
   const errorMessage = reason instanceof Error 
     ? reason.message 
