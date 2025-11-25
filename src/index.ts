@@ -10,8 +10,8 @@ import { StatusCodes } from 'http-status-codes';
  import logger from './lib/logger';
 import { logInfo, responseValidation } from './lib';
 import productRoutes from './routes/product/routes';
-import { scrapeProcessorTable } from './service/mobileDetails';
-import { crawlAllRows } from './service/mobileDetailsData';
+import { scrapeProcessorTable } from './service/mobile-details-scrapper';
+
 // import run from './service/scrapper';
 // import crawler from './service/scrapper';
 
