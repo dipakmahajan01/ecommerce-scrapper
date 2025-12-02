@@ -36,10 +36,10 @@ export class SpecsCrawler {
     this.crawler = new CheerioCrawler(
       {
         keepAlive: true,
-        maxConcurrency: 5,
+        maxConcurrency: 1,
         maxRequestRetries: 2,
-        maxRequestsPerMinute: 100,
-        requestHandlerTimeoutSecs: 30,
+        // maxRequestsPerMinute: 100,
+        // requestHandlerTimeoutSecs: 30,
 
         // Core parse logic:
         requestHandler: async ({ request, $, log }) => {
@@ -157,14 +157,9 @@ export class SpecsCrawler {
   public async processURL(url: string): Promise<ScrapeResult<Specs>> {
     const jobId = crypto.randomUUID();
     const promise = this.jobManager.createJob(jobId, url);
-    const r = await this.crawler.addRequests(
-      [{ url, userData: { jobId, originalUrl: url } }],
-      {
-        batchSize: 5,
-        waitBetweenBatchesMillis: 20_000,
-      }
-    );
-    console.log(JSON.stringify(r, null, 2));
+    await this.crawler.addRequests([
+      { url, userData: { jobId, originalUrl: url } },
+    ]);
     return promise;
   }
 }
