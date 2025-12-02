@@ -80,6 +80,7 @@ function sleep(ms: number) {
 
 let isScrapping = false;
 let lastScrap: null | string = null;
+let lastError: string = "";
 
 app.get("/scrap-status", (req: Request, res: Response) => {
   // Read and count items in processed-results.json
@@ -109,9 +110,9 @@ app.get("/scrap-status", (req: Request, res: Response) => {
 app.get("/run-code", async (req, res) => {
   try {
     // Read phones data from index-documents.json
+    if (isScrapping) return res.send("One job is already running");
     const filePath = path.join(__dirname, "../data/index-documents.json");
     const rawData = readFileSync(filePath, "utf-8");
-    // The JSON file may be a list or may have unwrapped content; fix as needed
     let phones;
     try {
       phones = JSON.parse(rawData);
@@ -123,35 +124,73 @@ app.get("/run-code", async (req, res) => {
       return res.send("The phones JSON is not an array");
     }
 
-    let urls = phones.phones.map((phone: any) => phone.url).filter(Boolean);
-    // Sequentially process each url with a 5 second delay
+    const urls: string[] = phones.phones
+      .map((phone: any) => phone.url)
+      .filter(Boolean);
+
+    // Path to the processed results file
+    const resultsFilePath = path.join(
+      __dirname,
+      "../data/processed-results.json"
+    );
+
+    // Helper: get already processed URLs from processed-results.json
+    const getProcessedUrls = (): Set<string> => {
+      let processedUrls = new Set<string>();
+      if (existsSync(resultsFilePath)) {
+        try {
+          const existingRawData = readFileSync(resultsFilePath, "utf-8");
+          const results = JSON.parse(existingRawData);
+          if (Array.isArray(results)) {
+            for (const item of results) {
+              if (item && typeof item.url === "string") {
+                processedUrls.add(item.url);
+              }
+            }
+          }
+        } catch (err) {
+          logger.warn("Could not read processed-results.json, starting fresh");
+        }
+      }
+      return processedUrls;
+    };
+
+    // Helper: append result to processed-results.json
+    const appendResultToFile = async (result: any) => {
+      let results: any[] = [];
+      try {
+        if (existsSync(resultsFilePath)) {
+          const existingRawData = await readFile(resultsFilePath, "utf-8");
+          results = JSON.parse(existingRawData) || [];
+          if (!Array.isArray(results)) results = [];
+        }
+      } catch (error) {
+        results = [];
+      }
+      results.push(result);
+      await writeFile(
+        resultsFilePath,
+        JSON.stringify(results, null, 2),
+        "utf-8"
+      );
+    };
+
+    // Get the set of already processed URLs
+    const processedUrlSet = getProcessedUrls();
+
+    // Filter out already processed URLs so restart resumes from where it left
+    const toProcessUrls = urls.filter((url) => !processedUrlSet.has(url));
+
+    // If no URLs left to process, notify user
+    if (toProcessUrls.length === 0) {
+      return res.send("All URLs have already been processed.");
+    }
+
+    // Sequentially process each remaining url with a 5 second delay
     (async () => {
-      for (const url of urls) {
+      for (const url of toProcessUrls) {
         isScrapping = true;
         console.log("PROCESSING", url);
-        // Common function to append processed data to a file without overwriting existing data
-        const appendResultToFile = async (result: any) => {
-          const resultsFilePath = path.join(
-            __dirname,
-            "../data/processed-results.json"
-          );
-          let results: any[] = [];
-          try {
-            if (existsSync(resultsFilePath)) {
-              const existingRawData = await readFile(resultsFilePath, "utf-8");
-              results = JSON.parse(existingRawData) || [];
-              if (!Array.isArray(results)) results = [];
-            }
-          } catch (error) {
-            results = [];
-          }
-          results.push(result);
-          await writeFile(
-            resultsFilePath,
-            JSON.stringify(results, null, 2),
-            "utf-8"
-          );
-        };
 
         try {
           const result = await ProductSpecsScraper.processURL(url);
@@ -163,19 +202,22 @@ app.get("/run-code", async (req, res) => {
           logger.info(`Processed: ${url}`);
           const ct = new Date();
           lastScrap = ct.toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
-        } catch (err) {
+        } catch (err: any) {
           logger.error(`Failed to process ${url}: ${(err as Error)?.message}`);
-          await GsmArenaModel.create({ url, data: "FAILED" }); // Save data
-
+          await GsmArenaModel.create({ url, data: "FAILED" }); // Save failure indicator
+          lastError = err.message ?? `${url} FAILED`;
           // Also log failure to the file
           await appendResultToFile({ url, data: "FAILED" });
         }
         await sleep(5000); // 5 second delay
       }
+      isScrapping = false;
       logger.info("All phone URLs have been processed.");
     })();
 
-    res.send("Work Started");
+    res.send(
+      `Work Started. To be processed: ${toProcessUrls.length}. Already processed: ${processedUrlSet.size}.`
+    );
   } catch (err: any) {
     logger.error("Error in /run-code endpoint:", err.message);
     res
