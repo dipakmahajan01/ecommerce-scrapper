@@ -5,7 +5,7 @@
   "scripts": {
     "prebuild": "rimraf dist",
     "start": "node build/server.js",
-    "dev": "nodemon  src/server.ts",
+    "dev": "nodemon --ignore '*.json' src/server.ts",
     "ts": "tsnd --respawn src/server.ts",
     "build": "tsc",
     "clean": "npx rimraf ./build",
