@@ -104,6 +104,7 @@ app.get("/scrap-status", (req: Request, res: Response) => {
     isScrapping,
     lastScrap,
     count,
+    lastError,
   });
 });
 
