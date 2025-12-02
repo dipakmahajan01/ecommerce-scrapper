@@ -1,4 +1,6 @@
+import { resolve } from "path";
 import { tryCatch, waitFor } from "../../lib";
+import { writeFileSync } from "fs";
 
 type PhoneTuple = [
   number,
@@ -294,6 +296,18 @@ async function getIndex(): Promise<{
   );
 
   const indexData = createIndex(phones, brandList);
+
+  const indexJsonPath = resolve(
+    __dirname,
+    "../../../data/index-documents.json"
+  );
+  // Serialize phones and brandList—not the whole BM25Index (it contains functions and non-serializable members).
+  // Instead, we store the minimum necessary to reconstruct the index.
+  const outputData = {
+    phones: indexData.phones,
+    brandList: indexData.brandList,
+  };
+  writeFileSync(indexJsonPath, JSON.stringify(outputData, null, 2));
 
   cacheManager.set(indexData);
 

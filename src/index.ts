@@ -16,6 +16,9 @@ const ProductSpecsScraper = new SpecsCrawler();
 import productRoutes from "./routes/product/routes";
 import { scrapeProcessorTable } from "./service/mobile-details-scrapper";
 import { GsmArenaModel } from "./models/gsm-arena";
+import path from "path";
+import { existsSync, readFileSync } from "fs";
+import { readFile, writeFile } from "fs/promises";
 
 // import run from './service/scrapper';
 // import crawler from './service/scrapper';
@@ -71,11 +74,114 @@ const health = (req: Request, res: Response) => {
 app.get("/", health);
 
 app.use("/api/products", productRoutes);
-app.post("/run-code", async (req, res) => {
-  const url = req.body.url;
-  const result = await ProductSpecsScraper.processURL(url);
-  const data = await GsmArenaModel.create(result);
-  res.json(data);
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+let isScrapping = false;
+let lastScrap: null | string = null;
+
+app.get("/scrap-status", (req: Request, res: Response) => {
+  // Read and count items in processed-results.json
+  const resultsFilePath = path.join(
+    __dirname,
+    "../data/processed-results.json"
+  );
+  let count = 0;
+  try {
+    if (existsSync(resultsFilePath)) {
+      const data = readFileSync(resultsFilePath, "utf-8");
+      const arr = JSON.parse(data);
+      if (Array.isArray(arr)) {
+        count = arr.length;
+      }
+    }
+  } catch {
+    count = 0;
+  }
+  res.json({
+    isScrapping,
+    lastScrap,
+    count,
+  });
+});
+
+app.get("/run-code", async (req, res) => {
+  try {
+    // Read phones data from index-documents.json
+    const filePath = path.join(__dirname, "../data/index-documents.json");
+    const rawData = readFileSync(filePath, "utf-8");
+    // The JSON file may be a list or may have unwrapped content; fix as needed
+    let phones;
+    try {
+      phones = JSON.parse(rawData);
+    } catch {
+      phones = {};
+      return res.send("PHONE IS EMPTY");
+    }
+    if (!Array.isArray(phones.phones)) {
+      return res.send("The phones JSON is not an array");
+    }
+
+    let urls = phones.phones.map((phone: any) => phone.url).filter(Boolean);
+    // Sequentially process each url with a 5 second delay
+    (async () => {
+      for (const url of urls) {
+        isScrapping = true;
+        console.log("PROCESSING", url);
+        // Common function to append processed data to a file without overwriting existing data
+        const appendResultToFile = async (result: any) => {
+          const resultsFilePath = path.join(
+            __dirname,
+            "../data/processed-results.json"
+          );
+          let results: any[] = [];
+          try {
+            if (existsSync(resultsFilePath)) {
+              const existingRawData = await readFile(resultsFilePath, "utf-8");
+              results = JSON.parse(existingRawData) || [];
+              if (!Array.isArray(results)) results = [];
+            }
+          } catch (error) {
+            results = [];
+          }
+          results.push(result);
+          await writeFile(
+            resultsFilePath,
+            JSON.stringify(results, null, 2),
+            "utf-8"
+          );
+        };
+
+        try {
+          const result = await ProductSpecsScraper.processURL(url);
+          await GsmArenaModel.create(result); // Save data
+
+          // Append the result to the file without erasing existing data
+          await appendResultToFile(result);
+
+          logger.info(`Processed: ${url}`);
+          const ct = new Date();
+          lastScrap = ct.toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
+        } catch (err) {
+          logger.error(`Failed to process ${url}: ${(err as Error)?.message}`);
+          await GsmArenaModel.create({ url, data: "FAILED" }); // Save data
+
+          // Also log failure to the file
+          await appendResultToFile({ url, data: "FAILED" });
+        }
+        await sleep(5000); // 5 second delay
+      }
+      logger.info("All phone URLs have been processed.");
+    })();
+
+    res.send("Work Started");
+  } catch (err: any) {
+    logger.error("Error in /run-code endpoint:", err.message);
+    res
+      .status(500)
+      .json({ error: "Could not process phone URLs", details: err.message });
+  }
 });
 
 app.use((req: Request, res: Response) => {
