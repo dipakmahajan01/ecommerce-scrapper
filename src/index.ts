@@ -82,6 +82,7 @@ let isScrapping = false;
 let lastScrap: null | string = null;
 let lastError: string = "";
 let shouldStopScraping = false;
+let failedCountInSequence = 0;
 
 // Provide progress info from DB, not the file
 app.get("/scrap-status", async (req: Request, res: Response) => {
@@ -102,6 +103,7 @@ app.get("/scrap-status", async (req: Request, res: Response) => {
     failed: failedCount,
     lastError,
     shouldStopScraping,
+    failedCountInSequence,
   });
 });
 
@@ -150,6 +152,12 @@ app.get("/run-code", async (req, res) => {
           logger.info("Scraping process has been stopped by user.");
           break;
         }
+        if (failedCountInSequence >= 20) {
+          logger.error(
+            "More than 20 requests failed in sequence. Stopping the scraping process."
+          );
+          break;
+        }
         console.log("PROCESSING", url);
         try {
           const result = await ProductSpecsScraper.processURL(url);
@@ -157,10 +165,12 @@ app.get("/run-code", async (req, res) => {
           logger.info(`Processed: ${url}`);
           const ct = new Date();
           lastScrap = ct.toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
+          failedCountInSequence = 0; // Reset on success
         } catch (err: any) {
           logger.error(`Failed to process ${url}: ${(err as Error)?.message}`);
           await GsmArenaModel.create({ url, data: "FAILED" });
           lastError = err.message ?? `${url} FAILED`;
+          failedCountInSequence += 1;
         }
         await sleep(10000);
       }
