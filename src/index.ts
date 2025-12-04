@@ -81,37 +81,35 @@ function sleep(ms: number) {
 let isScrapping = false;
 let lastScrap: null | string = null;
 let lastError: string = "";
+let shouldStopScraping = false;
 
-app.get("/scrap-status", (req: Request, res: Response) => {
-  // Read and count items in processed-results.json
-  const resultsFilePath = path.join(
-    __dirname,
-    "../data/processed-results.json"
-  );
-  let count = 0;
+// Provide progress info from DB, not the file
+app.get("/scrap-status", async (req: Request, res: Response) => {
+  let totalCount = 0;
+  let failedCount = 0;
   try {
-    if (existsSync(resultsFilePath)) {
-      const data = readFileSync(resultsFilePath, "utf-8");
-      const arr = JSON.parse(data);
-      if (Array.isArray(arr)) {
-        count = arr.length;
-      }
-    }
-  } catch {
-    count = 0;
+    totalCount = await GsmArenaModel.countDocuments();
+    failedCount = await GsmArenaModel.countDocuments({ data: "FAILED" });
+  } catch (err: any) {
+    totalCount = 0;
+    failedCount = 0;
+    logger.error("Error querying GsmArenaModel for status:", err?.message);
   }
   res.json({
     isScrapping,
     lastScrap,
-    count,
+    count: totalCount,
+    failed: failedCount,
     lastError,
+    shouldStopScraping,
   });
 });
 
 app.get("/run-code", async (req, res) => {
   try {
-    // Read phones data from index-documents.json
+    // 1. Read which data to process from index-documents.json
     if (isScrapping) return res.send("One job is already running");
+    shouldStopScraping = false; // reset stop flag
     const filePath = path.join(__dirname, "../data/index-documents.json");
     const rawData = readFileSync(filePath, "utf-8");
     let phones;
@@ -124,96 +122,53 @@ app.get("/run-code", async (req, res) => {
     if (!Array.isArray(phones.phones)) {
       return res.send("The phones JSON is not an array");
     }
-
     const urls: string[] = phones.phones
       .map((phone: any) => phone.url)
       .filter(Boolean);
 
-    // Path to the processed results file
-    const resultsFilePath = path.join(
-      __dirname,
-      "../data/processed-results.json"
+    // 2. Get already processed URLs from DB
+    const existingDocs = await GsmArenaModel.find(
+      { url: { $in: urls } },
+      { url: 1 }
+    ).lean();
+    const processedUrlSet = new Set<string>(
+      existingDocs.map((doc: any) => doc.url)
     );
 
-    // Helper: get already processed URLs from processed-results.json
-    const getProcessedUrls = (): Set<string> => {
-      let processedUrls = new Set<string>();
-      if (existsSync(resultsFilePath)) {
-        try {
-          const existingRawData = readFileSync(resultsFilePath, "utf-8");
-          const results = JSON.parse(existingRawData);
-          if (Array.isArray(results)) {
-            for (const item of results) {
-              if (item && typeof item.url === "string") {
-                processedUrls.add(item.url);
-              }
-            }
-          }
-        } catch (err) {
-          logger.warn("Could not read processed-results.json, starting fresh");
-        }
-      }
-      return processedUrls;
-    };
-
-    // Helper: append result to processed-results.json
-    const appendResultToFile = async (result: any) => {
-      let results: any[] = [];
-      try {
-        if (existsSync(resultsFilePath)) {
-          const existingRawData = await readFile(resultsFilePath, "utf-8");
-          results = JSON.parse(existingRawData) || [];
-          if (!Array.isArray(results)) results = [];
-        }
-      } catch (error) {
-        results = [];
-      }
-      results.push(result);
-      await writeFile(
-        resultsFilePath,
-        JSON.stringify(results, null, 2),
-        "utf-8"
-      );
-    };
-
-    // Get the set of already processed URLs
-    const processedUrlSet = getProcessedUrls();
-
-    // Filter out already processed URLs so restart resumes from where it left
+    // 3. Figure out which URLs to process
     const toProcessUrls = urls.filter((url) => !processedUrlSet.has(url));
 
-    // If no URLs left to process, notify user
     if (toProcessUrls.length === 0) {
       return res.send("All URLs have already been processed.");
     }
 
-    // Sequentially process each remaining url with a 5 second delay
+    // 4. Process each remaining url with 10s delay, can be stopped by /stop-run-code
     (async () => {
+      isScrapping = true;
       for (const url of toProcessUrls) {
-        isScrapping = true;
+        if (shouldStopScraping) {
+          logger.info("Scraping process has been stopped by user.");
+          break;
+        }
         console.log("PROCESSING", url);
-
         try {
           const result = await ProductSpecsScraper.processURL(url);
-          await GsmArenaModel.create(result); // Save data
-
-          // Append the result to the file without erasing existing data
-          await appendResultToFile(result);
-
+          await GsmArenaModel.create(result);
           logger.info(`Processed: ${url}`);
           const ct = new Date();
           lastScrap = ct.toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
         } catch (err: any) {
           logger.error(`Failed to process ${url}: ${(err as Error)?.message}`);
-          await GsmArenaModel.create({ url, data: "FAILED" }); // Save failure indicator
+          await GsmArenaModel.create({ url, data: "FAILED" });
           lastError = err.message ?? `${url} FAILED`;
-          // Also log failure to the file
-          await appendResultToFile({ url, data: "FAILED" });
         }
-        await sleep(5000); // 5 second delay
+        await sleep(10000);
       }
       isScrapping = false;
-      logger.info("All phone URLs have been processed.");
+      shouldStopScraping = false;
+      logger.info(
+        "All phone URLs have been processed or scraping was stopped."
+      );
     })();
 
     res.send(
@@ -225,6 +180,15 @@ app.get("/run-code", async (req, res) => {
       .status(500)
       .json({ error: "Could not process phone URLs", details: err.message });
   }
+});
+
+app.get("/stop-run-code", (req, res) => {
+  if (!isScrapping) {
+    res.json({ message: "No scraping job in progress." });
+    return;
+  }
+  shouldStopScraping = true;
+  res.json({ message: "Scraping job will be stopped soon." });
 });
 
 app.use((req: Request, res: Response) => {
