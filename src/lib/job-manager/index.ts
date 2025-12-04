@@ -15,7 +15,7 @@ export class JobManager<T = any> {
   private jobMap: Map<string, Job<T>> = new Map();
   private defaultTimeout: number;
 
-  constructor(timeoutMs = 30_000) {
+  constructor(timeoutMs = 60_000) {
     this.defaultTimeout = timeoutMs;
   }
 

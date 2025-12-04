@@ -1,5 +1,6 @@
 import { JobManager, ScrapeResult } from "../../lib";
 import { CheerioCrawler, Configuration } from "crawlee";
+import crypto from "crypto";
 
 type Specs = { [section: string]: { [label: string]: string } };
 
