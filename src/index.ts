@@ -1,251 +1,184 @@
-/* eslint-disable no-console */
-import * as bodyParser from "body-parser";
+// app.js — Node 18+
+// npm i express mongoose dotenv
+import express from "express";
+import mongoose, { Schema } from "mongoose";
 import dotenv from "dotenv";
-import express, { Request, Response } from "express"; // NextFunction,
-import http from "http";
-// import helmet from 'helmet';
-import cors from "cors";
-import { StatusCodes } from "http-status-codes";
-// import { Server } from 'socket.io';
-import logger from "./lib/logger";
-import { logInfo, responseValidation } from "./lib";
-// import { testFindPhoneURL } from "./services/gsm-areana/get-gsm-areana-spec-url";
-import { SpecParser, SpecsCrawler } from "./services";
-
-const ProductSpecsScraper = new SpecsCrawler();
-import productRoutes from "./routes/product/routes";
-import { scrapeProcessorTable } from "./service/mobile-details-scrapper";
-import { GsmArenaModel } from "./models/gsm-arena";
-import path from "path";
-import { existsSync, readFileSync } from "fs";
-import { readFile, writeFile } from "fs/promises";
-
-// import run from './service/scrapper';
-// import crawler from './service/scrapper';
 
 dotenv.config();
 
-const app = express();
+const LIST_API = "https://www.smartprix.com/ui/api/page-info";
+const PAGE_SIZE = 20;
+const MAX_FAILURES = 20;
 
-const server = new http.Server(app);
-app.use(cors());
-// const io = new Server(server,{cors: {origin: "*"}});
-// app.use(helmet());
-app.use(bodyParser.urlencoded({ extended: true }));
-app.use(bodyParser.json({ limit: "1tb" }));
-app.use((req, res, next) => {
-  try {
-    // set header for swagger.
-    res.setHeader(
-      "Content-Security-Policy",
-      "default-src 'self'; font-src 'self'; img-src 'self'; script-src 'self'; style-src 'self'; frame-src 'self';"
-    );
+const Ea = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_";
 
-    // end
-    const xForwardedFor = (
-      (req.headers["x-forwarded-for"] || "") as string
-    ).replace(/:\d+$/, "");
-    const ip = xForwardedFor || req.connection.remoteAddress?.split(":").pop();
-    logger.info(
-      `------------ API Info ------------
-      IMP - API called path: ${req.path},
-      method: ${req.method},
-      query: ${JSON.stringify(req.query)}, 
-      remote address (main/proxy ip):${ip},
-      reference: ${req.headers.referer} , 
-      user-agent: ${req.headers["user-agent"]}
-      ------------ End ------------  `
-    );
-  } catch (error) {
-    logger.error(`error while printing caller info path: ${req.path}`);
+function Pa(e: any) {
+  if (!e) return "";
+  const t = JSON.stringify(e);
+  let n = "1";
+  for (let s = 0; s < t.length; s++) {
+    let c = t.charCodeAt(s);
+    if (c > 127) n += t[s];
+    else {
+      c %= 95;
+      n += c < 64 ? Ea[c] : "." + Ea[63 & c];
+    }
   }
-
-  next();
-});
-
-const health = (req: Request, res: Response) => {
-  res.json({
-    message: "ecomsoft is working properly please check your api",
-    env: process.env.NODE_ENV,
-    headers: req.headers,
-  });
-};
-
-app.get("/", health);
-
-app.use("/api/products", productRoutes);
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return n;
 }
 
-let isScrapping = false;
-let lastScrap: null | string = null;
-let lastError: string = "";
-let shouldStopScraping = false;
-let failedCountInSequence = 0;
+const humanDelay = () =>
+  new Promise((r) => setTimeout(r, 5000 + Math.random() * 5000));
 
-// Provide progress info from DB, not the file
-app.get("/scrap-status", async (req: Request, res: Response) => {
-  let totalCount = 0;
-  let failedCount = 0;
-  try {
-    totalCount = await GsmArenaModel.countDocuments();
-    failedCount = await GsmArenaModel.countDocuments({ data: "FAILED" });
-  } catch (err: any) {
-    totalCount = 0;
-    failedCount = 0;
-    logger.error("Error querying GsmArenaModel for status:", err?.message);
+const browserHeaders = {
+  accept: "application/json, text/plain, */*",
+  "accept-language": "en-US,en;q=0.9",
+  "sec-ch-ua": '"Chromium";v="130", "Not=A?Brand";v="99"',
+  "sec-ch-ua-mobile": "?0",
+  "sec-ch-ua-platform": '"Windows"',
+  "sec-fetch-dest": "empty",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-site": "same-origin",
+  "user-agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+};
+
+const GsmArenaSchema = new Schema<any>({}, { strict: false, timestamps: true });
+
+const smartPrixResponse = mongoose.model<any>(
+  "smartPrixResponse",
+  GsmArenaSchema
+);
+
+// runtime-only scraper flags
+let running = false;
+let currentAfter = 0;
+let SESSION_START = Date.now();
+let reqCount = 0;
+let nextRotation = 10 + Math.floor(Math.random() * 11);
+
+function maybeRotateSession() {
+  reqCount++;
+  if (reqCount >= nextRotation) {
+    SESSION_START = Date.now();
+    reqCount = 0;
+    nextRotation = 10 + Math.floor(Math.random() * 11);
+    console.log("session rotated:", SESSION_START);
   }
-  res.json({
-    isScrapping,
-    lastScrap,
-    count: totalCount,
-    failed: failedCount,
-    lastError,
-    shouldStopScraping,
-    failedCountInSequence,
-  });
-});
+}
 
-app.get("/run-code", async (req, res) => {
-  try {
-    // 1. Read which data to process from index-documents.json
-    if (isScrapping) return res.send("One job is already running");
-    shouldStopScraping = false; // reset stop flag
-    const filePath = path.join(__dirname, "../data/index-documents.json");
-    const rawData = readFileSync(filePath, "utf-8");
-    let phones;
+async function fetchPage(after: number) {
+  maybeRotateSession();
+  const payload = {
+    url: "/mobiles",
+    data: { after },
+    referrer: "https://www.smartprix.com/",
+    t: Date.now(),
+    st: SESSION_START,
+  };
+  const token = Pa(payload);
+  const url = `${LIST_API}?k=${encodeURIComponent(token)}`;
+  console.log("URL", url);
+  const res = await fetch(url, { method: "GET", headers: browserHeaders });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+async function scraperLoop() {
+  console.log("scraper loop started");
+
+  let failureCount = 0;
+
+  while (running) {
     try {
-      phones = JSON.parse(rawData);
-    } catch {
-      phones = {};
-      return res.send("PHONE IS EMPTY");
-    }
-    if (!Array.isArray(phones.phones)) {
-      return res.send("The phones JSON is not an array");
-    }
-    const urls: string[] = phones.phones
-      .map((phone: any) => phone.url)
-      .filter(Boolean);
+      console.log("fetching after =", currentAfter);
+      const data = await fetchPage(currentAfter);
 
-    // 2. Get already processed URLs from DB
-    const existingDocs = await GsmArenaModel.find(
-      { url: { $in: urls } },
-      { url: 1 }
-    ).lean();
-    const processedUrlSet = new Set<string>(
-      existingDocs.map((doc: any) => doc.url)
-    );
+      await smartPrixResponse.create({
+        after: currentAfter,
+        raw: data,
+        success: true,
+      });
 
-    // 3. Figure out which URLs to process
-    const toProcessUrls = urls.filter((url) => !processedUrlSet.has(url));
+      failureCount = 0;
 
-    if (toProcessUrls.length === 0) {
-      return res.send("All URLs have already been processed.");
-    }
+      const sr = data?.item?.searchResults;
 
-    // 4. Process each remaining url with 10s delay, can be stopped by /stop-run-code
-    (async () => {
-      isScrapping = true;
-      for (const url of toProcessUrls) {
-        if (shouldStopScraping) {
-          logger.info("Scraping process has been stopped by user.");
-          break;
-        }
-        if (failedCountInSequence >= 20) {
-          logger.error(
-            "More than 20 requests failed in sequence. Stopping the scraping process."
-          );
-          break;
-        }
-        console.log("PROCESSING", url);
-        try {
-          const result = await ProductSpecsScraper.processURL(url);
-          await GsmArenaModel.create(result);
-          logger.info(`Processed: ${url}`);
-          const ct = new Date();
-          lastScrap = ct.toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
-          failedCountInSequence = 0; // Reset on success
-        } catch (err: any) {
-          logger.error(`Failed to process ${url}: ${(err as Error)?.message}`);
-          await GsmArenaModel.create({ url, data: "FAILED" });
-          lastError = err.message ?? `${url} FAILED`;
-          failedCountInSequence += 1;
-        }
-        await sleep(10000);
+      const hasNext = sr.pageInfo?.hasNextPage === true;
+
+      if (!hasNext) {
+        console.log("no next page → stop");
+        running = false;
+        break;
       }
-      isScrapping = false;
-      shouldStopScraping = false;
-      logger.info(
-        "All phone URLs have been processed or scraping was stopped."
-      );
-    })();
 
-    res.send(
-      `Work Started. To be processed: ${toProcessUrls.length}. Already processed: ${processedUrlSet.size}.`
-    );
-  } catch (err: any) {
-    logger.error("Error in /run-code endpoint:", err.message);
-    res
-      .status(500)
-      .json({ error: "Could not process phone URLs", details: err.message });
+      currentAfter += PAGE_SIZE;
+
+      await humanDelay();
+    } catch (err: any) {
+      failureCount++;
+      console.error("fetch error:", err.message);
+
+      await smartPrixResponse.create({
+        after: currentAfter,
+        raw: { error: err.message },
+        success: false,
+        error: err.message,
+      });
+
+      if (failureCount >= MAX_FAILURES) {
+        console.error("20 failures reached → stopping");
+        running = false;
+        break;
+      }
+
+      await new Promise((r) => setTimeout(r, 5000 + Math.random() * 10000));
+    }
   }
+
+  console.log("scraper loop finished");
+}
+
+// express server
+const app = express();
+app.use(express.json());
+
+// START
+app.get("/start", async (req, res) => {
+  if (running)
+    return res.status(400).json({ ok: false, msg: "already running" });
+
+  currentAfter = 20;
+  running = true;
+  scraperLoop().catch((err) => console.error("loop crash:", err));
+
+  res.json({ ok: true, msg: "started", after: currentAfter });
 });
 
-app.get("/stop-run-code", (req, res) => {
-  if (!isScrapping) {
-    res.json({ message: "No scraping job in progress." });
-    return;
-  }
-  shouldStopScraping = true;
-  res.json({ message: "Scraping job will be stopped soon." });
+// STOP
+app.post("/stop", (req, res) => {
+  if (!running) return res.status(400).json({ ok: false, msg: "not running" });
+  running = false;
+  res.json({ ok: true, msg: "stopping" });
 });
 
-app.use((req: Request, res: Response) => {
-  return res
-    .status(StatusCodes.INTERNAL_SERVER_ERROR)
-    .send(
-      responseValidation(StatusCodes.INTERNAL_SERVER_ERROR, "No route found")
-    );
-});
+// STATUS (DB-driven)
+app.get("/status", async (req, res) => {
+  const total = await smartPrixResponse.countDocuments();
+  const success = await smartPrixResponse.countDocuments({ success: true });
+  const failed = await smartPrixResponse.countDocuments({ success: false });
 
-app.use((error: any, req: Request, res: Response) => {
-  // , next: NextFunction
-  logInfo("app error----------------->", error.message);
-  return res.status(StatusCodes.INTERNAL_SERVER_ERROR).send(
-    responseValidation(
-      StatusCodes.INTERNAL_SERVER_ERROR,
-      /* If the environment is development, then return the error message, otherwise return an empty
-        object. */
-      process.env.NODE_ENV === "development" ? error.message : {}
-    )
-  );
-});
+  const last = await smartPrixResponse.findOne().sort({ createdAt: -1 });
 
-// run().catch((err) => {
-//     console.error(err);
-//     process.exit(1);
-// });
-// scrapeProcessorTable("https://nanoreview.net/en/soc-list/rating").catch((err:any) => {
-//     console.error(err);
-//     process.exit(1);
-// });
-// crawlAllRows('https://nanoreview.net/en/soc-list/rating').catch((err) => {
-//     console.error(err);
-//     process.exit(1);
-// });
-process.on("unhandledRejection", function (reason, promise) {
-  const errorMessage =
-    reason instanceof Error
-      ? reason.message
-      : typeof reason === "string"
-      ? reason
-      : JSON.stringify(reason, Object.getOwnPropertyNames(reason));
-  const stack = reason instanceof Error ? reason.stack : undefined;
-  logger.error("Unhandled rejection", {
-    error: errorMessage,
-    stack,
-    promise: promise?.toString?.() || "Promise object",
+  res.json({
+    ok: true,
+    running,
+    total,
+    success,
+    failed,
+    lastAfter: last?.after ?? null,
+    lastStatus: last?.success === false ? "error" : "ok",
+    lastError: last?.error ?? null,
   });
 });
 
