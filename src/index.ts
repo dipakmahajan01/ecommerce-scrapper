@@ -28,14 +28,16 @@ let MODE: "IDLE" | "RUNNING" | "STOPPED" = "IDLE";
 let failureCount = 0;
 let loopCount = 0;
 
+const color = {
+  info: (...args: any[]) => console.log(`\x1b[36m[INFO]\x1b[0m`, ...args),
+  warn: (...args: any[]) => console.log(`\x1b[33m[WARN]\x1b[0m`, ...args),
+  error: (...args: any[]) => console.log(`\x1b[31m[ERROR]\x1b[0m`, ...args),
+  success: (...args: any[]) => console.log(`\x1b[32m[SUCCESS]\x1b[0m`, ...args),
+  loop: (...args: any[]) => console.log(`\x1b[31m[LOOP]\x1b[0m`, ...args),
+};
+
 async function startSmartprixScraping() {
   // Color utility functions using ANSI codes
-  const color = {
-    info: (msg: string) => console.log(`\x1b[36m[INFO]\x1b[0m ${msg}`),
-    warn: (msg: string) => console.log(`\x1b[33m[WARN]\x1b[0m ${msg}`),
-    error: (msg: string) => console.log(`\x1b[31m[ERROR]\x1b[0m ${msg}`),
-    success: (msg: string) => console.log(`\x1b[32m[SUCCESS]\x1b[0m ${msg}`),
-  };
 
   let browser;
   let page;
@@ -44,22 +46,32 @@ async function startSmartprixScraping() {
   const maxBackoffMs = 60 * 60 * 1000; // Max 1 hour
 
   try {
-    browser = await chromium.launch({ headless: true });
+    browser = await chromium.launch({ headless: false });
     page = await browser.newPage();
 
     // Go to the Smartprix mobiles page
     color.info("Navigating to Smartprix mobiles page...");
-    await page.goto("https://www.smartprix.com/mobiles", {
+    // await page.goto("https://www.smartprix.com/mobiles", {
+    //   waitUntil: "domcontentloaded",
+    // });
+
+    await page.goto("https://www.smartprix.com/mobiles/samsung-brand", {
       waitUntil: "domcontentloaded",
     });
 
     // Wait for initial load-more button to appear
+    const pageContent = await page.content();
+    console.log("\x1b[35m[PAGE CONTENT]\x1b[0m", pageContent);
+
     color.info("Waiting for Load More button to appear...");
     await page.waitForSelector(".sm-load-more", { timeout: 20000 });
+
+    // Print the content of the page
 
     let loadMoreClickable = true;
     while (loadMoreClickable && MODE === "RUNNING") {
       loopCount++;
+      color.loop(loopCount); // Print the loop number in red
       color.info("Scrolling to Load More button...");
       await page.$eval(".sm-load-more", (el) => el.scrollIntoView());
 
@@ -156,22 +168,29 @@ async function startSmartprixScraping() {
 
       color.success(`Extracted ${products.length} products, writing to DB...`);
 
-      const ops = products.map((p) => ({
-        updateOne: {
-          filter: { link: p.link },
-          update: {
-            $setOnInsert: {
-              link: p.link,
-              title: p.title,
-              success: true,
-            },
-          },
-          upsert: true,
-        },
-      }));
-
       try {
-        await smartPrixResponse.bulkWrite(ops);
+        // Must be bulk operation: use bulkWrite to insert/update many documents in a single operation
+        const bulkOps = products.map((p) => ({
+          updateOne: {
+            filter: { link: p.link },
+            update: {
+              $set: {
+                brand: "Samsung", // update if exists
+              },
+              $setOnInsert: {
+                link: p.link,
+                title: p.title,
+                success: true, // only on new doc
+              },
+            },
+            upsert: true,
+          },
+        }));
+
+        if (bulkOps.length) {
+          await smartPrixResponse.bulkWrite(bulkOps, { ordered: false });
+        }
+
         color.success(`Saved ${products.length} products to DB.`);
       } catch (err: any) {
         color.error(`DB error: ${err && err.message ? err.message : err}`);
@@ -219,10 +238,93 @@ async function startSmartprixScraping() {
     MODE = "STOPPED";
   } finally {
     if (browser) {
-      await browser.close().catch(() => {});
+      // await browser.close().catch(() => {});
       color.info("Browser closed.");
     }
     color.info("Scraping session finished.");
+  }
+}
+
+async function fetchAndStoreHtmlForLinks() {
+  let browser;
+  try {
+    // Fetch all documents with a 'link' field, that don't have 'html' stored yet.
+    const links = await smartPrixResponse
+      .find({
+        link: { $exists: true },
+        html: { $exists: false },
+        brand: "Samsung",
+      })
+      .lean();
+
+    if (!Array.isArray(links) || links.length === 0) {
+      color.warn(
+        "No links found in smartPrixResponse collection without fetched HTML."
+      );
+      return;
+    }
+
+    browser = await chromium.launch({ headless: false });
+    const context = await browser.newContext();
+    await context.newPage();
+
+    const totalLinks = links.length;
+    let processed = 0;
+    for (const obj of links) {
+      const link = obj.link;
+      processed++;
+      const remaining = totalLinks - processed;
+      color.loop(
+        `Processing ${processed} of ${totalLinks}. Remaining: ${remaining}.`
+      );
+
+      if (!link) {
+        color.warn("Missing 'link' property in document:", obj);
+        continue;
+      }
+
+      let page;
+      try {
+        color.info(`Navigating: ${link}`);
+        page = await context.newPage();
+        await page.goto(link, {
+          waitUntil: "domcontentloaded",
+          timeout: 45000,
+        });
+        // Wait until the sm-fullspecs two-column section is present in the DOM.
+        await page.waitForSelector(".sm-fullspecs-grp", {
+          timeout: 15000,
+        });
+        const html = await page.content();
+
+        // Store html in DB using smartPrixResponse
+        await smartPrixResponse.updateOne({ _id: obj._id }, { $set: { html } });
+        color.info(`Stored HTML for ${link} in the database.`);
+      } catch (err: any) {
+        color.error(
+          `Error fetching/storing for ${link}: ${err.message || err}`
+        );
+      } finally {
+        if (page) {
+          await page.close().catch(() => {});
+        }
+      }
+
+      // Random delay between 2 and 5 seconds
+      const delay = 2000 + Math.random() * 2000;
+      color.info(
+        `Waiting ${Math.round(delay / 1000)} seconds before next fetch...`
+      );
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  } catch (err: any) {
+    color.error(
+      `Fatal error in fetchAndStoreHtmlForLinks: ${err.message || err}`
+    );
+  } finally {
+    if (browser) {
+      // await browser.close().catch(() => {});
+    }
   }
 }
 
@@ -412,7 +514,8 @@ app.get("/start", async (req, res) => {
   // running = true;
   // scraperLoop().catch((err) => console.error("loop crash:", err));
   failureCount = 0;
-  startSmartprixScraping();
+  // startSmartprixScraping();
+  fetchAndStoreHtmlForLinks();
   MODE = "RUNNING";
   res.json({ ok: true, msg: "started" });
 });
