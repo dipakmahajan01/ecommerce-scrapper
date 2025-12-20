@@ -5,7 +5,7 @@ import mongoose, { Schema } from "mongoose";
 import dotenv from "dotenv";
 
 // ADD: playwright import
-import { chromium } from "playwright";
+import { Browser, BrowserContext, chromium, Page } from "playwright";
 
 /**
  * Starts scraping the Smartprix mobiles page.
@@ -245,10 +245,127 @@ async function startSmartprixScraping() {
   }
 }
 
-async function fetchAndStoreHtmlForLinks() {
-  let browser;
+/**
+ * Fetches all Samsung links missing HTML and processes them in parallel batches ("batchCount" at a time).
+ * Use: await fetchAndStoreHtmlForLinks(3) // Processes 3 in parallel.
+ * Color-coded console logs are tagged with the batch number (for visual distinction).
+ */
+// async function fetchAndStoreHtmlForLinks(batchCount: number = 3) {
+//   let browser;
+//   try {
+//     // Fetch all documents with a 'link' field, that don't have 'html' stored yet.
+//     const links = await smartPrixResponse
+//       .find({
+//         link: { $exists: true },
+//         html: { $exists: false },
+//         brand: "Samsung",
+//       })
+//       .lean();
+
+//     if (!Array.isArray(links) || links.length === 0) {
+//       color.warn(
+//         "No links found in smartPrixResponse collection without fetched HTML."
+//       );
+//       return;
+//     }
+
+//     browser = await chromium.launch({ headless: false });
+//     const context = await browser.newContext();
+//     await context.newPage();
+
+//     const totalLinks = links.length;
+//     let processed = 0;
+
+//     // Helper: Processes a single link, with color logs tagged for batch
+//     async function processLink(obj: any, tag: string) {
+//       const link = obj.link;
+//       if (!link) {
+//         color.warn(`[${tag}] Missing 'link' property in document:`, obj);
+//         return;
+//       }
+//       let page;
+//       try {
+//         color.info(`[${tag}] Navigating: ${link}`);
+//         page = await context.newPage();
+//         await page.goto(link, {
+//           waitUntil: "domcontentloaded",
+//           timeout: 45000,
+//         });
+//         await page.waitForSelector(".sm-fullspecs-grp", {
+//           timeout: 15000,
+//         });
+//         const html = await page.content();
+//         await smartPrixResponse.updateOne({ _id: obj._id }, { $set: { html } });
+//         color.success(`[${tag}] Stored HTML for ${link} in the database.`);
+//       } catch (err: any) {
+//         color.error(
+//           `[${tag}] Error fetching/storing for ${link}: ${err?.message || err}`
+//         );
+//       } finally {
+//         if (page) {
+//           await page.close().catch(() => {});
+//         }
+//       }
+//       // Random delay between 2 and 5 seconds
+//       const delay = 2000 + Math.random() * 2000;
+//       color.info(`[${tag}] Waiting ${Math.round(delay / 1000)} seconds before next fetch...`);
+//       await new Promise((resolve) => setTimeout(resolve, delay));
+//     }
+
+//     // Batching logic
+//     for (let i = 0; i < totalLinks; i += batchCount) {
+//       const batch = links.slice(i, i + batchCount);
+//       processed += batch.length;
+//       const remaining = totalLinks - processed;
+//       // Each batch gets a sub-tag: "B1", "B2", etc.
+//       const batchTag = `Batch${Math.floor(i / batchCount) + 1}`;
+//       color.loop(
+//         `[${batchTag}] Processing ${processed - batch.length + 1}-${
+//           processed
+//         } of ${totalLinks}. Remaining: ${remaining}.`
+//       );
+//       // sequentially tag: Batch1.1, Batch1.2, ... or so
+//       await Promise.all(
+//         batch.map((obj, idx) => processLink(obj, `${batchTag}.${idx + 1}`))
+//       );
+//       // Optionally: Insert a pause between batches for safety
+//       if (i + batchCount < totalLinks) {
+//         color.info(
+//           `[${batchTag}] Batch complete. Waiting 2s before next batch...`
+//         );
+//         await new Promise((resolve) => setTimeout(resolve, 2000));
+//       }
+//     }
+//   } catch (err: any) {
+//     color.error(
+//       `Fatal error in fetchAndStoreHtmlForLinks: ${err.message || err}`
+//     );
+//   } finally {
+//     if (browser) {
+//       // await browser.close().catch(() => {});
+//     }
+//   }
+// }
+
+type SmartPrixDoc = {
+  _id: unknown;
+  link: string;
+};
+
+type Options = {
+  contextsCount?: number;
+  minDelay?: number;
+  maxDelay?: number;
+};
+
+async function fetchAndStoreHtmlSmartprix({
+  contextsCount = 3,
+  minDelay = 2500,
+  maxDelay = 5000,
+}: Options): Promise<void> {
+  let browser: Browser | undefined;
+
   try {
-    // Fetch all documents with a 'link' field, that don't have 'html' stored yet.
     const links = await smartPrixResponse
       .find({
         link: { $exists: true },
@@ -257,74 +374,119 @@ async function fetchAndStoreHtmlForLinks() {
       })
       .lean();
 
-    if (!Array.isArray(links) || links.length === 0) {
-      color.warn(
-        "No links found in smartPrixResponse collection without fetched HTML."
-      );
+    if (links.length === 0) {
+      color.warn("Nothing to fetch. Database already bored.");
       return;
     }
 
-    browser = await chromium.launch({ headless: false });
-    const context = await browser.newContext();
-    await context.newPage();
-
-    const totalLinks = links.length;
-    let processed = 0;
-    for (const obj of links) {
-      const link = obj.link;
-      processed++;
-      const remaining = totalLinks - processed;
-      color.loop(
-        `Processing ${processed} of ${totalLinks}. Remaining: ${remaining}.`
-      );
-
-      if (!link) {
-        color.warn("Missing 'link' property in document:", obj);
-        continue;
-      }
-
-      let page;
-      try {
-        color.info(`Navigating: ${link}`);
-        page = await context.newPage();
-        await page.goto(link, {
-          waitUntil: "domcontentloaded",
-          timeout: 45000,
-        });
-        // Wait until the sm-fullspecs two-column section is present in the DOM.
-        await page.waitForSelector(".sm-fullspecs-grp", {
-          timeout: 15000,
-        });
-        const html = await page.content();
-
-        // Store html in DB using smartPrixResponse
-        await smartPrixResponse.updateOne({ _id: obj._id }, { $set: { html } });
-        color.info(`Stored HTML for ${link} in the database.`);
-      } catch (err: any) {
-        color.error(
-          `Error fetching/storing for ${link}: ${err.message || err}`
-        );
-      } finally {
-        if (page) {
-          await page.close().catch(() => {});
-        }
-      }
-
-      // Random delay between 2 and 5 seconds
-      const delay = 2000 + Math.random() * 2000;
-      color.info(
-        `Waiting ${Math.round(delay / 1000)} seconds before next fetch...`
-      );
-      await new Promise((resolve) => setTimeout(resolve, delay));
-    }
-  } catch (err: any) {
-    color.error(
-      `Fatal error in fetchAndStoreHtmlForLinks: ${err.message || err}`
+    color.info(
+      `Preparing to fetch HTML for ${links.length} links using ${contextsCount} parallel contexts.`
     );
-  } finally {
-    if (browser) {
-      // await browser.close().catch(() => {});
+
+    browser = await chromium.launch({ headless: false });
+
+    const contexts: BrowserContext[] = await Promise.all(
+      Array.from({ length: contextsCount }).map(async (_, idx) => {
+        const ctx = await browser!.newContext({
+          viewport: { width: 1366, height: 768 },
+        });
+
+        await ctx.route("**/*", (route) => {
+          const type = route.request().resourceType();
+          if (type === "image" || type === "font" || type === "media") {
+            route.abort();
+          } else {
+            route.continue();
+          }
+        });
+
+        color.info(`BrowserContext CTX${idx + 1} initialized.`);
+        return ctx;
+      })
+    );
+
+    // Split work into buckets, one for each context
+    const buckets: (typeof links)[] = Array.from(
+      { length: contextsCount },
+      () => []
+    );
+
+    links.forEach((doc, i) => {
+      buckets[i % contextsCount].push(doc);
+    });
+
+    let overallProcessed = 0;
+    const total = links.length;
+
+    async function worker(
+      ctx: BrowserContext,
+      jobs: typeof links,
+      tag: string
+    ): Promise<void> {
+      color.loop(`[${tag}] Starting batch: ${jobs.length} links assigned.`);
+      const page: Page = await ctx.newPage();
+
+      for (let j = 0; j < jobs.length; ++j) {
+        const obj = jobs[j];
+        const jobId = `${tag}#${j + 1}/${jobs.length}`;
+        color.info(
+          `[${jobId}] [{${overallProcessed + 1}/${total}}] Visiting: ${
+            obj.link
+          }`
+        );
+
+        try {
+          color.info(`[${jobId}] Navigating to link...`);
+          await page.goto(obj.link, {
+            waitUntil: "domcontentloaded",
+            timeout: 45_000,
+          });
+          color.info(`[${jobId}] Waiting for '.sm-fullspecs-grp'...`);
+          await page.waitForSelector(".sm-fullspecs-grp", {
+            timeout: 15_000,
+          });
+
+          color.info(`[${jobId}] Extracting HTML...`);
+          const html: string = await page.content();
+
+          color.info(`[${jobId}] Storing HTML to DB...`);
+          await smartPrixResponse.updateOne(
+            { _id: obj._id },
+            { $set: { html } }
+          );
+          color.success(`[${jobId}] Success: HTML stored.`);
+        } catch (err: any) {
+          color.warn(
+            `[${jobId}] Failed: ${obj.link}. Reason: ${err?.message || err}`
+          );
+          await page.waitForTimeout(10_000);
+        }
+
+        overallProcessed++;
+        const delay = minDelay + Math.random() * (maxDelay - minDelay);
+        color.info(
+          `[${jobId}] [${overallProcessed}/${total}] Waiting ${Math.round(
+            delay
+          )}ms before next request...`
+        );
+        await page.waitForTimeout(delay);
+      }
+      color.loop(`[${tag}] Batch complete!`);
+      await page.close();
     }
+
+    await Promise.all(
+      buckets.map((jobs, i) => worker(contexts[i], jobs, `CTX${i + 1}`))
+    );
+
+    color.success(
+      `All batches complete. Processed ${overallProcessed} / ${total} links.`
+    );
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    color.error(`Fatal scraper error: ${msg}`);
+  } finally {
+    // browser?.close(); // optional
   }
 }
 
@@ -515,7 +677,7 @@ app.get("/start", async (req, res) => {
   // scraperLoop().catch((err) => console.error("loop crash:", err));
   failureCount = 0;
   // startSmartprixScraping();
-  fetchAndStoreHtmlForLinks();
+  fetchAndStoreHtmlSmartprix({ contextsCount: 3, maxDelay: 4, minDelay: 1 });
   MODE = "RUNNING";
   res.json({ ok: true, msg: "started" });
 });
