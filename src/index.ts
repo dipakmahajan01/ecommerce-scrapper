@@ -6,6 +6,16 @@ import dotenv from "dotenv";
 
 // ADD: playwright import
 import { Browser, BrowserContext, chromium, Page } from "playwright";
+import {
+  normalizeSpecs,
+  parseSmartprixPhoneSpecs,
+} from "./services/smartprix-products-extractions";
+import productSearch from "./services/flipkart-product-spec-scrapper/product-search";
+import { smartPrixResponse } from "./models/smartprix";
+import {
+  populateProductDetails,
+  sortProductList,
+} from "./services/smartprix-products-extractions/product-sort";
 
 /**
  * Starts scraping the Smartprix mobiles page.
@@ -17,12 +27,6 @@ import { Browser, BrowserContext, chromium, Page } from "playwright";
  * - Waits 10-20 seconds between actions
  * - Repeats until "Load More" is not clickable
  */
-const GsmArenaSchema = new Schema<any>({}, { strict: false, timestamps: true });
-
-const smartPrixResponse = mongoose.model<any>(
-  "smartPrixResponse",
-  GsmArenaSchema
-);
 
 let MODE: "IDLE" | "RUNNING" | "STOPPED" = "IDLE";
 let failureCount = 0;
@@ -710,6 +714,191 @@ app.get("/status", async (req, res) => {
     lastStatus: last?.success === false ? "error" : "ok",
     lastError: last?.error ?? null,
   });
+});
+
+async function extractAndSaveSmartprixParsedSpecs() {
+  // Get all docs with html not null/missing, and where parseHtmlSpec is missing
+  const cursor = smartPrixResponse
+    .find({
+      brand: "Samsung",
+      html: { $exists: true, $ne: null },
+    })
+    .cursor();
+  let counter = 0;
+  for (let doc = await cursor.next(); doc != null; doc = await cursor.next()) {
+    try {
+      // Log which document is being processed
+      color.info(
+        `Processing doc: _id=${doc._id} model=${doc.title || "?"} link=${
+          doc.link || "?"
+        }`
+      );
+
+      // "html" can be quite large
+      const html = doc.html;
+      const brand = doc.brand || "Samsung";
+      if (!html || typeof html !== "string") {
+        color.warn(
+          `Doc ID ${doc._id}: Missing or invalid HTML, cannot parse specs.`
+        );
+        await smartPrixResponse.updateOne(
+          { _id: doc._id },
+          {
+            $set: { parseHtmlSpec: { error: "Missing or invalid HTML" } },
+          }
+        );
+        continue;
+      }
+
+      const parsed = parseSmartprixPhoneSpecs(html, brand);
+
+      await smartPrixResponse.updateOne(
+        { _id: doc._id },
+        {
+          $set: { parseHtmlSpec: parsed },
+        }
+      );
+      counter++;
+    } catch (err: any) {
+      // Optionally, log or track errors per doc
+      color.error("Spec parse error for doc id", doc._id, err?.message || err);
+      await smartPrixResponse.updateOne(
+        { _id: doc._id },
+        {
+          $set: { parseHtmlSpec: { error: err?.message || String(err) } },
+        }
+      );
+    }
+  }
+  return counter;
+}
+
+async function normalizeSpecsAndSave() {
+  // Only consider docs where "parseHtmlSpec" exists
+  const cursor = smartPrixResponse
+    .find({
+      brand: "Samsung",
+      html: { $exists: true, $ne: null },
+      parseHtmlSpec: { $exists: true },
+    })
+    .cursor();
+  let counter = 0;
+  for (let doc = await cursor.next(); doc != null; doc = await cursor.next()) {
+    try {
+      // Log which document is being processed
+      color.info(
+        `Processing doc: _id=${doc._id} model=${doc.title || "?"} link=${
+          doc.link || "?"
+        }`
+      );
+
+      // Check for already present parseHtmlSpec in db
+      if (
+        !doc.parseHtmlSpec ||
+        typeof doc.parseHtmlSpec !== "object" ||
+        !doc.parseHtmlSpec.meta
+      ) {
+        color.warn(
+          `Doc ID ${doc._id}: No valid parseHtmlSpec present, skipping.`
+        );
+        continue;
+      }
+
+      // Normalize parseHtmlSpec (from existing)
+      const normalized = await normalizeSpecs(doc.parseHtmlSpec);
+
+      await smartPrixResponse.updateOne(
+        { _id: doc._id },
+        {
+          $set: { normalizedSpecs: normalized },
+        }
+      );
+      counter++;
+    } catch (err: any) {
+      // Optionally, log or track errors per doc
+      color.error(
+        "Spec normalization error for doc id",
+        doc._id,
+        err?.message || err
+      );
+      await smartPrixResponse.updateOne(
+        { _id: doc._id },
+        {
+          $set: {
+            normalizedSpecs: { error: err?.message || String(err) },
+          },
+        }
+      );
+    }
+  }
+  return counter;
+}
+
+// Example route handler to trigger this operation manually:
+app.post("/extract-parsed-specs", async (req, res) => {
+  const count = await normalizeSpecsAndSave();
+  res.json({ ok: true, processed: count });
+});
+
+// API endpoint: GET /api/smartprix-specs
+
+// GET /api/smartprix-specs?brand=Samsung&lifecycle=considerable
+app.get("/api/smartprix-specs", async (req, res) => {
+  try {
+    const { brand, lifecycle } = req.query;
+
+    // Build query object for MongoDB
+    const dbQuery: any = {
+      "parseHtmlSpec.meta": { $exists: true },
+    };
+    if (brand) {
+      dbQuery.brand = brand;
+    }
+    if (lifecycle) {
+      dbQuery["parseHtmlSpec.meta.lifecycle"] = lifecycle;
+    }
+
+    // Fetch matching entries
+    const docs = await smartPrixResponse.find(dbQuery).lean();
+
+    // Map/format for response
+    const results = docs.map((doc: any) => {
+      const meta = doc.parseHtmlSpec?.meta || {};
+      return {
+        ...doc.parseHtmlSpec.specs.technical,
+        // meta,
+        // link: doc.link,
+        // title: doc.title || meta.model || "",
+      };
+    });
+
+    res.json({ ok: true, data: results, count: results.length });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err?.message || String(err) });
+  }
+});
+
+app.get("/api/flipkart-search/:query", async (req, res) => {
+  try {
+    const { query } = req.params;
+    if (!query || typeof query !== "string") {
+      return res
+        .status(400)
+        .json({ ok: false, error: "Missing path parameter 'product'" });
+    }
+
+    const result = await productSearch(query, "flipkart.com", 3);
+    res.json({ ok: true, ...result });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err?.message || String(err) });
+  }
+});
+
+app.get("/exe", async (req, res) => {
+  const productsWithDetails = await populateProductDetails();
+  const results = await sortProductList(productsWithDetails.enrichedList);
+
+  return res.json(results);
 });
 
 export default app;
