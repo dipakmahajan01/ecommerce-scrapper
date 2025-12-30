@@ -17,7 +17,8 @@
     "postinstall-dev": "git config core.hooksPath ./git-hooks",
     "postinstall": "if-env NODE_ENV=production && npm run postinstall-production || npm run postinstall-dev || true",
     "lint": "eslint .",
-    "format": "prettier --write \"{src,apps,libs,test}/**/*.ts\""
+    "format": "prettier --write \"{src,apps,libs,test}/**/*.ts\"",
+    "populate:devices-list": "ts-node scripts/populateDeviceList.ts"
   },
   "keywords": [],
   "author": "",
