@@ -123,9 +123,24 @@ export type ExtractedCamera = {
 };
 
 // ---- Technical/CPU ----
+export type GeekbenchBreakdown = {
+  CPU: string;
+  GPU: string;
+  Memory: string;
+  UX: string;
+  "Total score"?: string; // TODO: fix this
+  [key: string]: string | undefined;
+};
+
+export type Geekbench = {
+  total: string;
+  breakdown: GeekbenchBreakdown;
+  [key: string]: unknown;
+};
+
 export type ExtractedTechnical = {
   chipset: string;
-  geekbench: Record<string, unknown>; // As per structure of .antutu
+  geekbench: Geekbench;
 };
 
 // ---- Combined Extracted Specs ----
@@ -148,7 +163,61 @@ export type StatKey =
   | "ppi"
   | "capacity"
   | "rearMp"
-  | "frontMp";
+  | "frontMp"
+  | "cpu"
+  | "gpu";
 
 export type Score = Partial<Record<StatKey, number | null>> &
   Partial<{ total: number }>;
+
+// =====================
+// Category Scoring Types
+// =====================
+
+export type CategoryWeights = {
+  batteryEndurance: number;
+  // softwareExperience: number;
+  displayQuality: number;
+  cpuPerformance: number;
+  gpuPerformance: number;
+  cameraQuality: number;
+};
+
+export type CategoryScore = {
+  category: string;
+  rawScore: number; // Normalized score (0-1)
+  weightedScore: number; // rawScore * weight
+};
+
+export type ProductCategoryScores = {
+  batteryEndurance: CategoryScore;
+  // softwareExperience: CategoryScore;
+  displayQuality: CategoryScore;
+  cpuPerformance: CategoryScore;
+  gpuPerformance: CategoryScore;
+  cameraQuality: CategoryScore;
+  totalWeightedScore: number;
+};
+
+/**
+ * Normalization context with pre-calculated min/max values for performance
+ */
+export type NormalizationContext = {
+  batteryCapacity: { min: number; max: number };
+  // softwareScore: { min: number; max: number };
+  displayType: { min: number; max: number };
+  displayPpi: { min: number; max: number };
+  displayRefreshRate: { min: number; max: number };
+  displayBrightness: { min: number; max: number };
+  // displayHdr: { min: number; max: number };
+  cpuScore: { min: number; max: number };
+  gpuScore: { min: number; max: number };
+  cameraMainMp: { min: number; max: number };
+  // cameraCount: { min: number; max: number };
+};
+
+export interface CategoryProcessor {
+  process(product: SmartPrixRecord, context: NormalizationContext): number; // Returns normalized score (0-1), must be between 0-1
+  getCategoryName(): string;
+  prepareContext(allProducts: SmartPrixRecord[]): Partial<NormalizationContext>;
+}

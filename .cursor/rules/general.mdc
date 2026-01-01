@@ -1,0 +1,6 @@
+---
+alwaysApply: true
+---
+
+- For any function that requires three or more arguments, pass a single options object instead of multiple positional arguments.
+- Write comments only when necessary for clarity or explaining complex code; avoid unnecessary commenting.

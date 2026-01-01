@@ -5,13 +5,10 @@ import {
   Score,
   SmartPrixRecord,
   StatKey,
+  CategoryWeights,
+  ProductCategoryScores,
 } from "./types";
-import {
-  getHighestAndLowestValues,
-  getNestedValue,
-  minMaxNormalize,
-  tokenSimilarity,
-} from "./utils";
+import { scoreAndRankProducts } from "./scoringEngine";
 
 export const getProductDetails = async (productList: { name: string }[]) => {
   const docs = getDeviceList();
@@ -23,7 +20,7 @@ export const getProductDetails = async (productList: { name: string }[]) => {
   }));
 
   const enrichedList = productList.map((product) => {
-    let bestMatch: any = null;
+    let bestMatch: SmartPrixRecord | null = null;
     let bestScore = 0.0;
 
     const productTokens = product.name
@@ -32,7 +29,6 @@ export const getProductDetails = async (productList: { name: string }[]) => {
       .filter(Boolean);
 
     for (const { dbProd, tokens: dbProdTokens } of dbProdTokenCache) {
-      // Compute intersection/union directly for token similarity, avoid reconstructing sets for each dbProd
       const productTokenSet = new Set(productTokens);
 
       const intersectionSize = dbProdTokens.filter((token) =>
@@ -44,91 +40,24 @@ export const getProductDetails = async (productList: { name: string }[]) => {
       const score = intersectionSize / unionSize;
 
       if (score > bestScore) {
+        // Ensure dbProd has FullSpecsResult shape, then add realTitle separately for return type
         bestScore = score;
-        bestMatch = {
-          title: dbProd.title,
-          link: dbProd.link,
-          realTitle: product.name,
-          parseSpecs: dbProd.parseHtmlSpec,
-        };
+        bestMatch = dbProd;
       }
     }
 
-    return bestScore > 0.4
-      ? {
-          ...bestMatch,
-          realTitle: product.name,
-        }
+    return bestScore > 0.4 && bestMatch
+      ? { ...bestMatch, realTitle: product.name }
       : null;
   });
 
   return enrichedList;
 };
 
-export const sortProductList = async (productList: SmartPrixRecord[]) => {
-  const highestAndLowestValues = getHighestAndLowestValues(productList);
-  // For each product, calculate normalized scores for each stat, and add a total as 'score.total'
-  const normalizeRatedProducts = productList.map((product) => {
-    const productClone = structuredClone({
-      ...product,
-      score: {} as Score,
-    });
-
-    const scores: Score = {};
-    const fields: [string, StatKey][] = [
-      ["display.resolution.value", "displayResolution"],
-      ["display.type.score", "displayType"], // 'type' may be optional / not always present
-      ["display.brightness.value", "brightness"],
-      ["display.refreshRate.value", "refreshRate"],
-      ["display.ppi.value", "ppi"],
-      ["battery.capacity.value", "capacity"],
-      ["camera.rearCamera[0].megapixel", "rearMp"],
-      ["camera.frontCamera[0].megapixel", "frontMp"],
-    ];
-
-    for (const [path, statKey] of fields) {
-      let value: number | null | undefined = null;
-
-      try {
-        value = getNestedValue(productClone.normalizedSpecs.extracted, path);
-      } catch {
-        value = null;
-      }
-
-      const min =
-        highestAndLowestValues[statKey as keyof typeof highestAndLowestValues]
-          ?.low;
-      const max =
-        highestAndLowestValues[statKey as keyof typeof highestAndLowestValues]
-          ?.high;
-
-      // Only calculate score if value/min/max all exist and min != max (avoid div by zero)
-      if (
-        typeof value === "number" &&
-        typeof min === "number" &&
-        typeof max === "number" &&
-        max > min
-      ) {
-        scores[statKey] = minMaxNormalize(value, min, max);
-      } else {
-        scores[statKey] = null;
-      }
-    }
-
-    // Calculate the total of every score (ignoring nulls)
-    const scoreValues = Object.values(scores).filter(
-      (item) => typeof item === "number"
-    );
-    const totalScore = scoreValues.reduce((sum, v) => sum + (v ?? 0), 0);
-
-    scores.total = totalScore;
-    productClone.score = scores;
-    return productClone;
-  });
-
-  const topProducts = normalizeRatedProducts.sort(
-    (a, b) => (b.score?.total ?? 0) - (a.score?.total ?? 0)
-  );
-
-  return topProducts.slice(0, 20);
+export const scoreAndRankProductList = (
+  productList: SmartPrixRecord[],
+  weights: CategoryWeights,
+  topN: number = 20
+): Array<SmartPrixRecord & { categoryScores: ProductCategoryScores }> => {
+  return scoreAndRankProducts(productList, weights, topN);
 };

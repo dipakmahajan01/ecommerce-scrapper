@@ -1,0 +1,560 @@
+import {
+  CategoryProcessor,
+  SmartPrixRecord,
+  NormalizationContext,
+} from "./types";
+
+/**
+ * Base class for category processors with common normalization utilities
+ */
+abstract class BaseCategoryProcessor implements CategoryProcessor {
+  abstract process(
+    product: SmartPrixRecord,
+    context: NormalizationContext
+  ): number;
+  abstract getCategoryName(): string;
+  abstract prepareContext(
+    allProducts: SmartPrixRecord[]
+  ): Partial<NormalizationContext>;
+
+  /**
+   * Normalize a value using min-max normalization with pre-calculated min/max
+   */
+  protected normalizeValue(
+    value: number | null | undefined,
+    min: number,
+    max: number
+  ): number {
+    if (value === null || value === undefined || isNaN(value)) {
+      return 0;
+    }
+
+    if (max === min) {
+      // All same value, return 0.5 to maintain scoring integrity
+      return 0.5;
+    }
+
+    const normalized = this.minMaxNormalize(value, min, max);
+    // Ensure result is between 0-1 (minMaxNormalize should already do this, but double-check)
+    return Math.max(0, Math.min(1, normalized));
+  }
+
+  protected minMaxNormalize(x: number, min: number, max: number) {
+    return (x - min) / (max - min);
+  }
+}
+
+/**
+ * Battery Endurance Processor (Weight: batteryEndurance)
+ * Uses: battery.capacity.value (mAh)
+ */
+export class BatteryEnduranceProcessor extends BaseCategoryProcessor {
+  getCategoryName(): string {
+    return "batteryEndurance";
+  }
+
+  prepareContext(
+    allProducts: SmartPrixRecord[]
+  ): Partial<NormalizationContext> {
+    const values = allProducts
+      .map((p) => p.normalizedSpecs.extracted.battery?.capacity?.value)
+      .filter((v): v is number => v !== null && v !== undefined && !isNaN(v));
+
+    if (values.length === 0) {
+      return { batteryCapacity: { min: 0, max: 1 } };
+    }
+
+    return {
+      batteryCapacity: {
+        min: Math.min(...values),
+        max: Math.max(...values),
+      },
+    };
+  }
+
+  process(product: SmartPrixRecord, context: NormalizationContext): number {
+    const capacity = product.normalizedSpecs.extracted.battery?.capacity?.value;
+    return this.normalizeValue(
+      capacity,
+      context.batteryCapacity.min,
+      context.batteryCapacity.max
+    );
+  }
+}
+
+/**
+ * Software Experience Processor (Weight: softwareExperience)
+ * Uses: technical.os, technical.customUi, brand-level update policy (derived)
+ */
+// export class SoftwareExperienceProcessor extends BaseCategoryProcessor {
+//   getCategoryName(): string {
+//     return "softwareExperience";
+//   }
+
+//   prepareContext(
+//     allProducts: SmartPrixRecord[]
+//   ): Partial<NormalizationContext> {
+//     const scores = allProducts.map((p) => this.calculateSoftwareScore(p));
+
+//     if (scores.length === 0) {
+//       return { softwareScore: { min: 0, max: 1 } };
+//     }
+
+//     return {
+//       softwareScore: {
+//         min: Math.min(...scores),
+//         max: Math.max(...scores),
+//       },
+//     };
+//   }
+
+//   process(product: SmartPrixRecord, context: NormalizationContext): number {
+//     const combinedScore = this.calculateSoftwareScore(product);
+//     return this.normalizeValue(
+//       combinedScore,
+//       context.softwareScore.min,
+//       context.softwareScore.max
+//     );
+//   }
+
+//   private calculateSoftwareScore(product: SmartPrixRecord): number {
+//     const specs = product.normalizedSpecs.specs;
+//     const technical = specs.technical || {};
+//     const os = technical["OS"] || technical["Operating System"] || "";
+//     const customUi =
+//       technical["Custom UI"] ||
+//       technical["User Interface"] ||
+//       technical["UI"] ||
+//       "";
+//     const brand = product.brand || product.normalizedSpecs.meta.brand || "";
+
+//     const osScore = this.getOSScore(os);
+//     const uiScore = this.getUIScore(customUi);
+//     const brandScore = this.getBrandUpdatePolicyScore(brand);
+
+//     // Combine: OS (40%) + UI (30%) + Brand Policy (30%)
+//     return osScore * 0.4 + uiScore * 0.3 + brandScore * 0.3;
+//   }
+
+//   private getOSScore(os: string): number {
+//     const osLower = os.toLowerCase();
+//     // Latest Android versions score higher
+//     if (osLower.includes("android 14") || osLower.includes("android 15")) {
+//       return 10;
+//     }
+//     if (osLower.includes("android 13") || osLower.includes("android 12")) {
+//       return 8;
+//     }
+//     if (osLower.includes("android 11") || osLower.includes("android 10")) {
+//       return 6;
+//     }
+//     if (osLower.includes("android")) {
+//       return 5;
+//     }
+//     // iOS versions
+//     if (osLower.includes("ios 17") || osLower.includes("ios 18")) {
+//       return 10;
+//     }
+//     if (osLower.includes("ios 16") || osLower.includes("ios 15")) {
+//       return 8;
+//     }
+//     if (osLower.includes("ios")) {
+//       return 7;
+//     }
+//     return 3; // Unknown/other
+//   }
+
+//   private getUIScore(customUi: string): number {
+//     const uiLower = customUi.toLowerCase();
+//     // Stock or near-stock UIs score higher
+//     if (
+//       uiLower.includes("stock") ||
+//       uiLower.includes("pure") ||
+//       uiLower.includes("vanilla") ||
+//       uiLower === "" ||
+//       uiLower === "none"
+//     ) {
+//       return 10;
+//     }
+//     // Well-known optimized UIs
+//     if (
+//       uiLower.includes("one ui") ||
+//       uiLower.includes("oxygenos") ||
+//       uiLower.includes("coloros") ||
+//       uiLower.includes("miui")
+//     ) {
+//       return 7;
+//     }
+//     // Other custom UIs
+//     if (uiLower.length > 0) {
+//       return 5;
+//     }
+//     return 3; // Unknown
+//   }
+
+//   private getBrandUpdatePolicyScore(brand: string): number {
+//     const brandLower = brand.toLowerCase();
+//     // Brands known for good update policies
+//     if (
+//       brandLower.includes("google") ||
+//       brandLower.includes("pixel") ||
+//       brandLower.includes("samsung") ||
+//       brandLower.includes("oneplus") ||
+//       brandLower.includes("apple")
+//     ) {
+//       return 10;
+//     }
+//     // Mid-tier update support
+//     if (
+//       brandLower.includes("xiaomi") ||
+//       brandLower.includes("oppo") ||
+//       brandLower.includes("vivo") ||
+//       brandLower.includes("realme")
+//     ) {
+//       return 6;
+//     }
+//     // Default for unknown brands
+//     return 5;
+//   }
+// }
+
+/**
+ * Display Quality Processor (Weight: displayQuality)
+ * Uses: display.type (tiered), display.ppi, display.refreshRate, peak brightness, HDR support
+ */
+export class DisplayQualityProcessor extends BaseCategoryProcessor {
+  getCategoryName(): string {
+    return "displayQuality";
+  }
+
+  prepareContext(
+    allProducts: SmartPrixRecord[]
+  ): Partial<NormalizationContext> {
+    const typeScores: number[] = [];
+    const ppiValues: number[] = [];
+    const refreshRateValues: number[] = [];
+    const brightnessValues: number[] = [];
+    // const hdrScores: number[] = [];
+
+    allProducts.forEach((p) => {
+      const display = p.normalizedSpecs.extracted.display;
+
+      // Display type score
+      if (display?.type?.score !== undefined) {
+        typeScores.push(display.type.score);
+      }
+
+      // PPI
+      if (display?.ppi?.value !== undefined && !isNaN(display.ppi.value)) {
+        ppiValues.push(display.ppi.value);
+      }
+
+      // Refresh rate
+      if (
+        display?.refreshRate?.value !== undefined &&
+        !isNaN(display.refreshRate.value)
+      ) {
+        refreshRateValues.push(display.refreshRate.value);
+      }
+
+      // Brightness
+      if (
+        display?.brightness?.value !== undefined &&
+        !isNaN(display.brightness.value)
+      ) {
+        brightnessValues.push(display.brightness.value);
+      }
+
+      // HDR score
+      // if (display?.hdr?.score !== undefined) {
+      //   hdrScores.push(display.hdr.score);
+      // }
+    });
+
+    return {
+      displayType: {
+        min: typeScores.length > 0 ? Math.min(...typeScores) : 0,
+        max: typeScores.length > 0 ? Math.max(...typeScores) : 10,
+      },
+      displayPpi: {
+        min: ppiValues.length > 0 ? Math.min(...ppiValues) : 0,
+        max: ppiValues.length > 0 ? Math.max(...ppiValues) : 1,
+      },
+      displayRefreshRate: {
+        min: refreshRateValues.length > 0 ? Math.min(...refreshRateValues) : 0,
+        max: refreshRateValues.length > 0 ? Math.max(...refreshRateValues) : 1,
+      },
+      displayBrightness: {
+        min: brightnessValues.length > 0 ? Math.min(...brightnessValues) : 0,
+        max: brightnessValues.length > 0 ? Math.max(...brightnessValues) : 1,
+      },
+      // displayHdr: {
+      //   min: hdrScores.length > 0 ? Math.min(...hdrScores) : 0,
+      //   max: hdrScores.length > 0 ? Math.max(...hdrScores) : 10,
+      // },
+    };
+  }
+
+  process(product: SmartPrixRecord, context: NormalizationContext): number {
+    const display = product.normalizedSpecs.extracted.display;
+
+    // Display type score (normalize from its range to 0-1)
+    const typeScoreRaw = display?.type?.score ?? 0;
+    const typeScore = this.normalizeValue(
+      typeScoreRaw,
+      context.displayType.min,
+      context.displayType.max
+    );
+
+    // PPI score
+    const ppiScore = this.normalizeValue(
+      display?.ppi?.value,
+      context.displayPpi.min,
+      context.displayPpi.max
+    );
+
+    // Refresh rate score
+    const refreshRateScore = this.normalizeValue(
+      display?.refreshRate?.value,
+      context.displayRefreshRate.min,
+      context.displayRefreshRate.max
+    );
+
+    // Brightness score
+    const brightnessScore = this.normalizeValue(
+      display?.brightness?.value,
+      context.displayBrightness.min,
+      context.displayBrightness.max
+    );
+
+    // HDR score (normalize from its range to 0-1)
+    // const hdrScoreRaw = display?.hdr?.score ?? 0;
+    // const hdrScore = this.normalizeValue(
+    //   hdrScoreRaw,
+    //   context.displayHdr.min,
+    //   context.displayHdr.max
+    // );
+
+    // Weighted combination:
+    // Type: 30%, PPI: 25%, Refresh Rate: 20%, Brightness: 15%, HDR: 10%
+    // All components are already normalized 0-1, so result will be 0-1
+    const combinedScore =
+      typeScore * 0.3 +
+      ppiScore * 0.25 +
+      refreshRateScore * 0.2 +
+      brightnessScore * 0.15;
+    // +
+    // hdrScore * 0.1;
+
+    // Since all components are 0-1 and weights sum to 1, result is guaranteed 0-1
+    return combinedScore;
+  }
+}
+
+/**
+ * CPU Performance Processor (Weight: cpuPerformance)
+ * Uses: technical.geekbench.breakdown.CPU
+ */
+export class CPUPerformanceProcessor extends BaseCategoryProcessor {
+  getCategoryName(): string {
+    return "cpuPerformance";
+  }
+
+  prepareContext(
+    allProducts: SmartPrixRecord[]
+  ): Partial<NormalizationContext> {
+    const values = allProducts
+      .map((p) => {
+        const scoreStr =
+          p.normalizedSpecs.extracted.technical.geekbench.breakdown.CPU;
+        return typeof scoreStr === "string" ? parseFloat(scoreStr) : null;
+      })
+      .filter((v): v is number => v !== null && !isNaN(v));
+
+    if (values.length === 0) {
+      return { cpuScore: { min: 0, max: 1 } };
+    }
+
+    return {
+      cpuScore: {
+        min: Math.min(...values),
+        max: Math.max(...values),
+      },
+    };
+  }
+
+  process(product: SmartPrixRecord, context: NormalizationContext): number {
+    const cpuScoreStr =
+      product.normalizedSpecs.extracted.technical.geekbench.breakdown.CPU;
+    const cpuScore =
+      typeof cpuScoreStr === "string" ? parseFloat(cpuScoreStr) : null;
+
+    return this.normalizeValue(
+      cpuScore,
+      context.cpuScore.min,
+      context.cpuScore.max
+    );
+  }
+}
+
+/**
+ * GPU Performance Processor (Weight: gpuPerformance)
+ * Uses: technical.geekbench.breakdown.GPU
+ */
+export class GPUPerformanceProcessor extends BaseCategoryProcessor {
+  getCategoryName(): string {
+    return "gpuPerformance";
+  }
+
+  prepareContext(
+    allProducts: SmartPrixRecord[]
+  ): Partial<NormalizationContext> {
+    const values = allProducts
+      .map((p) => {
+        const scoreStr =
+          p.normalizedSpecs.extracted.technical.geekbench.breakdown.GPU;
+        return typeof scoreStr === "string" ? parseFloat(scoreStr) : null;
+      })
+      .filter((v): v is number => v !== null && !isNaN(v));
+
+    if (values.length === 0) {
+      return { gpuScore: { min: 0, max: 1 } };
+    }
+
+    return {
+      gpuScore: {
+        min: Math.min(...values),
+        max: Math.max(...values),
+      },
+    };
+  }
+
+  process(product: SmartPrixRecord, context: NormalizationContext): number {
+    const gpuScoreStr =
+      product.normalizedSpecs.extracted.technical.geekbench.breakdown.GPU;
+    const gpuScore =
+      typeof gpuScoreStr === "string" ? parseFloat(gpuScoreStr) : null;
+
+    return this.normalizeValue(
+      gpuScore,
+      context.gpuScore.min,
+      context.gpuScore.max
+    );
+  }
+}
+
+/**
+ * Camera Quality Processor (Weight: cameraQuality)
+ * Uses: camera.rearCamera (megapixel, camera type: main/ultrawide/telephoto/macro)
+ */
+export class CameraQualityProcessor extends BaseCategoryProcessor {
+  getCategoryName(): string {
+    return "cameraQuality";
+  }
+
+  prepareContext(
+    allProducts: SmartPrixRecord[]
+  ): Partial<NormalizationContext> {
+    const mainMpValues: number[] = [];
+    const cameraCounts: number[] = [];
+
+    allProducts.forEach((p) => {
+      const rearCameras = p.normalizedSpecs.extracted.camera.rearCamera || [];
+
+      // Main camera megapixels
+      const mainCamera = rearCameras.find((c) => c.position === "main");
+      if (mainCamera?.megapixel !== undefined) {
+        mainMpValues.push(mainCamera.megapixel);
+      }
+
+      // Camera count
+      // const hasUltrawide = rearCameras.some(
+      //   (c) => c.position === "ultrawide" || c.type === "ultrawide"
+      // );
+      // const hasTelephoto = rearCameras.some(
+      //   (c) => c.position === "telephoto" || c.type === "telephoto"
+      // );
+      // const hasMacro = rearCameras.some(
+      //   (c) => c.position === "macro" || c.type === "macro"
+      // );
+      // const cameraCount =
+      //   1 +
+      //   (hasUltrawide ? 1 : 0) +
+      //   (hasTelephoto ? 1 : 0) +
+      //   (hasMacro ? 1 : 0);
+      // cameraCounts.push(cameraCount);
+    });
+
+    return {
+      cameraMainMp: {
+        min: mainMpValues.length > 0 ? Math.min(...mainMpValues) : 0,
+        max: mainMpValues.length > 0 ? Math.max(...mainMpValues) : 1,
+      },
+      // cameraCount: {
+      //   min: cameraCounts.length > 0 ? Math.min(...cameraCounts) : 1,
+      //   max: cameraCounts.length > 0 ? Math.max(...cameraCounts) : 1,
+      // },
+    };
+  }
+
+  process(product: SmartPrixRecord, context: NormalizationContext): number {
+    const rearCameras = product.normalizedSpecs.extracted.camera.rearCamera;
+
+    if (!rearCameras || rearCameras.length === 0) {
+      return 0;
+    }
+
+    // Extract main camera megapixels
+    const mainCamera = rearCameras.find((c) => c.position === "main");
+    const mainMp = mainCamera?.megapixel || 0;
+
+    // // Count camera types (main, ultrawide, telephoto, macro)
+    // const hasUltrawide = rearCameras.some(
+    //   (c) => c.position === "ultrawide" || c.type === "ultrawide"
+    // );
+    // const hasTelephoto = rearCameras.some(
+    //   (c) => c.position === "telephoto" || c.type === "telephoto"
+    // );
+    // const hasMacro = rearCameras.some(
+    //   (c) => c.position === "macro" || c.type === "macro"
+    // );
+
+    // const cameraCount =
+    //   1 + (hasUltrawide ? 1 : 0) + (hasTelephoto ? 1 : 0) + (hasMacro ? 1 : 0);
+
+    // // Normalize camera count
+    // const cameraCountScore = this.normalizeValue(
+    //   cameraCount,
+    //   context.cameraCount.min,
+    //   context.cameraCount.max
+    // );
+
+    // Normalize main camera megapixel
+    const mainMpScore = this.normalizeValue(
+      mainMp,
+      context.cameraMainMp.min,
+      context.cameraMainMp.max
+    );
+
+    // Combine: Main MP (70%) + Camera Count (30%)
+    // Both are normalized 0-1, so result is guaranteed 0-1
+    const combinedScore = mainMpScore * 0.7;
+    // + cameraCountScore * 0.3;
+
+    return combinedScore;
+  }
+}
+
+/**
+ * Factory function to get all category processors
+ */
+export function getCategoryProcessors(): CategoryProcessor[] {
+  return [
+    new BatteryEnduranceProcessor(),
+    // new SoftwareExperienceProcessor(),
+    new DisplayQualityProcessor(),
+    new CPUPerformanceProcessor(),
+    new GPUPerformanceProcessor(),
+    new CameraQualityProcessor(),
+  ];
+}
