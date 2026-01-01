@@ -389,6 +389,7 @@ async function extractCPU(technical: any): Promise<ExtractedTechnical> {
   const socData = await socDataIntance.fetchSocData();
   const chipData = socData.find((doc) => {
     if (!doc.title) return false;
+    console.log("VAL", doc.title, technicalSpec.chipset);
     return matchChip(doc.title, technicalSpec.chipset);
   });
   technicalSpec.geekbench = {

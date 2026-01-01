@@ -175,7 +175,9 @@ export function extractSmartprixVariants(
 }
 
 export function extractReleaseStatus($: cheerio.CheerioAPI): string {
-  return $(".pg-prd-head > div.liner").text().trim();
+  const liner = $(".pg-prd-head .liner").first();
+  const text = liner.text().replace(/\s+/g, " ").trim();
+  return text;
 }
 
 export function getSmartprixLifecycle(
@@ -184,7 +186,7 @@ export function getSmartprixLifecycle(
 ): Lifecycle {
   // Check release status for special keywords
   const status = (releaseStatus || "").toLowerCase();
-
+  console.log("ReleaseStatus", releaseDateRaw, releaseStatus);
   if (/rumou?red/.test(status)) {
     return "rumored"; // or a special value if you want
   }
@@ -253,6 +255,7 @@ export const parseSmartprixPhoneSpecs = (
   const releaseStatus = extractReleaseStatus($);
   meta.variants = extractSmartprixVariants($);
   const specs = extractSpecsObject($);
+  console.log("ReleaseStatus", specs.general.model);
   meta.lifecycle = getSmartprixLifecycle(
     releaseStatus,
     specs.general?.releaseDate ?? null

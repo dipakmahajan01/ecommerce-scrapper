@@ -721,7 +721,12 @@ async function extractAndSaveSmartprixParsedSpecs() {
   const cursor = smartPrixResponse
     .find({
       brand: "Samsung",
-      html: { $exists: true, $ne: null },
+      "normalizedSpecs.error": { $exists: true },
+      $or: [
+        { "parseHtmlSpec.meta.lifecycle": "considerable" },
+        { "parseHtmlSpec.meta.lifecycle": "unknown" },
+        // { "parseHtmlSpec.meta.lifecycle": "outdated" },
+      ],
     })
     .cursor();
   let counter = 0;
@@ -778,12 +783,21 @@ async function normalizeSpecsAndSave() {
   const cursor = smartPrixResponse
     .find({
       brand: "Samsung",
-      html: { $exists: true, $ne: null },
-      parseHtmlSpec: { $exists: true },
+      "normalizedSpecs.error": { $exists: true },
+      $or: [
+        { "parseHtmlSpec.meta.lifecycle": "considerable" },
+        { "parseHtmlSpec.meta.lifecycle": "unknown" },
+        { "parseHtmlSpec.meta.lifecycle": "outdated" },
+      ],
     })
     .cursor();
   let counter = 0;
+  let shouldBreak = false;
   for (let doc = await cursor.next(); doc != null; doc = await cursor.next()) {
+    if (shouldBreak) {
+      break;
+    }
+    shouldBreak = true;
     try {
       // Log which document is being processed
       color.info(
@@ -816,11 +830,7 @@ async function normalizeSpecsAndSave() {
       counter++;
     } catch (err: any) {
       // Optionally, log or track errors per doc
-      color.error(
-        "Spec normalization error for doc id",
-        doc._id,
-        err?.message || err
-      );
+      color.error("Spec normalization error for doc id", doc._id, err);
       await smartPrixResponse.updateOne(
         { _id: doc._id },
         {
@@ -836,7 +846,8 @@ async function normalizeSpecsAndSave() {
 
 // Example route handler to trigger this operation manually:
 app.post("/extract-parsed-specs", async (req, res) => {
-  const count = await normalizeSpecsAndSave();
+  // const count = await normalizeSpecsAndSave();
+  const count = await extractAndSaveSmartprixParsedSpecs();
   res.json({ ok: true, processed: count });
 });
 
