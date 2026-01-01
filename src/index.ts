@@ -40,7 +40,7 @@ const color = {
   loop: (...args: any[]) => console.log(`\x1b[31m[LOOP]\x1b[0m`, ...args),
 };
 
-async function startSmartprixScraping() {
+async function startSmartprixScraping(link: string) {
   // Color utility functions using ANSI codes
 
   let browser;
@@ -59,7 +59,7 @@ async function startSmartprixScraping() {
     //   waitUntil: "domcontentloaded",
     // });
 
-    await page.goto("https://www.smartprix.com/mobiles/samsung-brand", {
+    await page.goto(link, {
       waitUntil: "domcontentloaded",
     });
 
@@ -680,8 +680,8 @@ app.get("/start", async (req, res) => {
   // running = true;
   // scraperLoop().catch((err) => console.error("loop crash:", err));
   failureCount = 0;
-  // startSmartprixScraping();
-  fetchAndStoreHtmlSmartprix({ contextsCount: 3, maxDelay: 4, minDelay: 1 });
+  startSmartprixScraping("https://www.smartprix.com/mobiles/samsung-brand");
+  // fetchAndStoreHtmlSmartprix({ contextsCount: 3, maxDelay: 4, minDelay: 1 });
   MODE = "RUNNING";
   res.json({ ok: true, msg: "started" });
 });
