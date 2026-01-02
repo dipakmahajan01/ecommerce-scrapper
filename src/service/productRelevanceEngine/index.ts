@@ -51,13 +51,15 @@ export const getProductDetails = async (productList: { name: string }[]) => {
       : null;
   });
 
-  return enrichedList;
+  return enrichedList.filter(
+    (x): x is SmartPrixRecord & { realTitle: string } => x !== null
+  );
 };
 
 export const scoreAndRankProductList = (
   productList: SmartPrixRecord[],
   weights: CategoryWeights,
   topN: number = 20
-): Array<SmartPrixRecord & { categoryScores: ProductCategoryScores }> => {
+) => {
   return scoreAndRankProducts(productList, weights, topN);
 };

@@ -1,4 +1,6 @@
 ---
+description: Project-wide coding style and best-practice preferences.
+globs: ["**/*.{js,ts,tsx,jsx,css,html,json}"]
 alwaysApply: true
 ---
 

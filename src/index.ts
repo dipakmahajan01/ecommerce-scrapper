@@ -5,17 +5,17 @@ import express, { Request, Response } from "express"; // NextFunction,
 import http from "http";
 import cors from "cors";
 import { StatusCodes } from "http-status-codes";
-import logger from "./lib/logger";
-import { logInfo, responseValidation } from "./lib";
-import productRoutes from "./routes/product/routes";
+import logger from "@src/lib/logger";
+import { logInfo, responseValidation } from "@src/lib";
+import productRoutes from "@src/routes/product/routes";
 import {
   getProductDetails,
   scoreAndRankProductList,
-} from "./service/productRelevanceEngine";
+} from "@src/service/productRelevanceEngine";
 import {
   CategoryWeights,
   SmartPrixRecord,
-} from "./service/productRelevanceEngine/types";
+} from "@src/service/productRelevanceEngine/types";
 
 dotenv.config();
 
@@ -688,23 +688,6 @@ app.get("/start", async (req, res) => {
 
   const productDetailsList = await getProductDetails(dummyInput);
 
-  // Filter out nulls and products missing necessary normalizedSpecs/extracted fields
-  // Also strip 'realTitle' property which is not part of SmartPrixRecord
-  const filteredProductDetailsList = productDetailsList
-    .filter((product): product is NonNullable<typeof product> => {
-      return (
-        product !== null &&
-        !!product.normalizedSpecs &&
-        !!product.normalizedSpecs.extracted
-      );
-    })
-    .map(({ realTitle, ...product }) => product as SmartPrixRecord);
-
-  console.log(
-    "productDetailsList",
-    productDetailsList.length,
-    filteredProductDetailsList.length
-  );
   const categoryWeights: CategoryWeights = {
     batteryEndurance: 26,
     displayQuality: 14,
@@ -714,7 +697,7 @@ app.get("/start", async (req, res) => {
   };
 
   const sortedData = scoreAndRankProductList(
-    filteredProductDetailsList,
+    productDetailsList,
     categoryWeights,
     20
   );

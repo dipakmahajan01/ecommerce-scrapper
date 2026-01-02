@@ -20,6 +20,24 @@ function getProcessorMap(): Map<string, CategoryProcessor> {
 }
 
 /**
+ * Stage 1: Validation Pipeline
+ * Filters products to keep only those that pass validation from ALL processors
+ */
+function validateProducts(products: SmartPrixRecord[]): SmartPrixRecord[] {
+  if (products.length === 0) {
+    return [];
+  }
+
+  const processors = getCategoryProcessors();
+  const validProducts = products.filter((product) => {
+    // Product must pass validation from ALL processors
+    return processors.every((processor) => processor.validateProduct(product));
+  });
+
+  return validProducts;
+}
+
+/**
  * Build complete normalization context from all products
  */
 function buildNormalizationContext(
@@ -137,21 +155,30 @@ export function scoreProduct(
 
 /**
  * Score all products and return top N products sorted by total weighted score
+ * Pipeline: Validation → Context Building → Scoring
  */
 export function scoreAndRankProducts(
   products: SmartPrixRecord[],
   weights: CategoryWeights,
   topN: number = 20
-): Array<SmartPrixRecord & { categoryScores: ProductCategoryScores }> {
+) {
   if (products.length === 0) {
     return [];
   }
 
-  // Pre-calculate normalization context once for all products
-  const context = buildNormalizationContext(products);
+  // Stage 1: Validation Pipeline
+  const validProducts = validateProducts(products);
+  console.log("VALID PRODUCTS", products.length, "==", validProducts.length);
 
-  // Score all products
-  const scoredProducts = products.map((product) => ({
+  if (validProducts.length === 0) {
+    return [];
+  }
+
+  // Stage 2: Context Building
+  const context = buildNormalizationContext(validProducts);
+
+  // Stage 3: Scoring Pipeline
+  const scoredProducts = validProducts.map((product) => ({
     ...product,
     categoryScores: scoreProduct(product, context, weights),
   }));
@@ -163,5 +190,11 @@ export function scoreAndRankProducts(
   );
 
   // Return top N
-  return scoredProducts.slice(0, topN);
+  return scoredProducts.slice(0, topN).map((product) => ({
+    link: product.link,
+    title: product.title,
+    brand: product.brand,
+    extracted: product.normalizedSpecs?.extracted,
+    ...product.categoryScores,
+  }));
 }

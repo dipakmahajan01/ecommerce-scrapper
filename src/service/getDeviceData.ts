@@ -2,7 +2,7 @@ import path from "path";
 import fs from "fs";
 import { SmartPrixRecord } from "./productRelevanceEngine/types";
 
-const deviceListPath = path.join(__dirname, "../data/deviceList.json");
+const deviceListPath = path.resolve(process.cwd(), "data/deviceList.json");
 
 let cachedDeviceList: SmartPrixRecord[] | null = null;
 

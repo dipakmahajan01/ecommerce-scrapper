@@ -1,3 +1,4 @@
+import { z } from "zod";
 import {
   CategoryProcessor,
   SmartPrixRecord,
@@ -16,6 +17,7 @@ abstract class BaseCategoryProcessor implements CategoryProcessor {
   abstract prepareContext(
     allProducts: SmartPrixRecord[]
   ): Partial<NormalizationContext>;
+  abstract validateProduct(product: SmartPrixRecord): boolean;
 
   /**
    * Normalize a value using min-max normalization with pre-calculated min/max
@@ -49,8 +51,34 @@ abstract class BaseCategoryProcessor implements CategoryProcessor {
  * Uses: battery.capacity.value (mAh)
  */
 export class BatteryEnduranceProcessor extends BaseCategoryProcessor {
+  private isValidBatteryCapacity(capacity: unknown): boolean {
+    return (
+      capacity !== null &&
+      capacity !== undefined &&
+      typeof capacity === "number" &&
+      !isNaN(capacity) &&
+      isFinite(capacity)
+    );
+  }
+
+  private readonly batterySchema = z.any().refine(
+    (product: SmartPrixRecord) => {
+      const batteryCapacity =
+        product.normalizedSpecs?.extracted?.battery?.capacity?.value;
+      return this.isValidBatteryCapacity(batteryCapacity);
+    },
+    {
+      message: "Battery capacity value must be a valid number",
+    }
+  );
+
   getCategoryName(): string {
     return "batteryEndurance";
+  }
+
+  validateProduct(product: SmartPrixRecord): boolean {
+    const result = this.batterySchema.safeParse(product);
+    return result.success;
   }
 
   prepareContext(
@@ -223,8 +251,56 @@ export class BatteryEnduranceProcessor extends BaseCategoryProcessor {
  * Uses: display.type (tiered), display.ppi, display.refreshRate, peak brightness, HDR support
  */
 export class DisplayQualityProcessor extends BaseCategoryProcessor {
+  private isValidNumber(value: unknown): boolean {
+    return (
+      value !== null &&
+      value !== undefined &&
+      typeof value === "number" &&
+      !isNaN(value) &&
+      isFinite(value)
+    );
+  }
+
+  private hasRequiredDisplayFields(display: unknown): boolean {
+    if (!display || typeof display !== "object") return false;
+
+    const displayObj = display as {
+      type?: { score?: unknown };
+      ppi?: { value: unknown } | null;
+      refreshRate?: { value: unknown } | null;
+      brightness?: { value: unknown } | null;
+    };
+
+    const hasTypeScore = this.isValidNumber(displayObj.type?.score);
+    const hasPpiValue = this.isValidNumber(displayObj.ppi?.value);
+    const hasRefreshRateValue = this.isValidNumber(
+      displayObj.refreshRate?.value
+    );
+    const hasBrightnessValue = this.isValidNumber(displayObj.brightness?.value);
+
+    return (
+      hasTypeScore && hasPpiValue && hasRefreshRateValue && hasBrightnessValue
+    );
+  }
+
+  private readonly displaySchema = z.any().refine(
+    (product: SmartPrixRecord) => {
+      const display = product.normalizedSpecs?.extracted?.display;
+      return this.hasRequiredDisplayFields(display);
+    },
+    {
+      message:
+        "Display must have type.score, ppi.value, refreshRate.value, and brightness.value as valid numbers",
+    }
+  );
+
   getCategoryName(): string {
     return "displayQuality";
+  }
+
+  validateProduct(product: SmartPrixRecord): boolean {
+    const result = this.displaySchema.safeParse(product);
+    return result.success;
   }
 
   prepareContext(
@@ -356,8 +432,31 @@ export class DisplayQualityProcessor extends BaseCategoryProcessor {
  * Uses: technical.geekbench.breakdown.CPU
  */
 export class CPUPerformanceProcessor extends BaseCategoryProcessor {
+  private isParseableNumberString(value: unknown): boolean {
+    if (typeof value !== "string") return false;
+    const parsed = parseFloat(value);
+    return !isNaN(parsed) && isFinite(parsed);
+  }
+
+  private readonly cpuSchema = z.any().refine(
+    (product: SmartPrixRecord) => {
+      const cpuGeekbenchScore =
+        product.normalizedSpecs?.extracted?.technical?.geekbench?.breakdown
+          ?.CPU;
+      return this.isParseableNumberString(cpuGeekbenchScore);
+    },
+    {
+      message: "CPU Geekbench score must be a parseable number string",
+    }
+  );
+
   getCategoryName(): string {
     return "cpuPerformance";
+  }
+
+  validateProduct(product: SmartPrixRecord): boolean {
+    const result = this.cpuSchema.safeParse(product);
+    return result.success;
   }
 
   prepareContext(
@@ -402,8 +501,31 @@ export class CPUPerformanceProcessor extends BaseCategoryProcessor {
  * Uses: technical.geekbench.breakdown.GPU
  */
 export class GPUPerformanceProcessor extends BaseCategoryProcessor {
+  private isParseableNumberString(value: unknown): boolean {
+    if (typeof value !== "string") return false;
+    const parsed = parseFloat(value);
+    return !isNaN(parsed) && isFinite(parsed);
+  }
+
+  private readonly gpuSchema = z.any().refine(
+    (product: SmartPrixRecord) => {
+      const gpuGeekbenchScore =
+        product.normalizedSpecs?.extracted?.technical?.geekbench?.breakdown
+          ?.GPU;
+      return this.isParseableNumberString(gpuGeekbenchScore);
+    },
+    {
+      message: "GPU Geekbench score must be a parseable number string",
+    }
+  );
+
   getCategoryName(): string {
     return "gpuPerformance";
+  }
+
+  validateProduct(product: SmartPrixRecord): boolean {
+    const result = this.gpuSchema.safeParse(product);
+    return result.success;
   }
 
   prepareContext(
@@ -448,8 +570,48 @@ export class GPUPerformanceProcessor extends BaseCategoryProcessor {
  * Uses: camera.rearCamera (megapixel, camera type: main/ultrawide/telephoto/macro)
  */
 export class CameraQualityProcessor extends BaseCategoryProcessor {
+  private isValidNumber(value: unknown): boolean {
+    return (
+      value !== null &&
+      value !== undefined &&
+      typeof value === "number" &&
+      !isNaN(value) &&
+      isFinite(value)
+    );
+  }
+
+  private hasMainCameraWithValidMegapixel(rearCameras: unknown): boolean {
+    if (!Array.isArray(rearCameras) || rearCameras.length === 0) {
+      return false;
+    }
+
+    const mainCamera = rearCameras.find((camera) => camera.position === "main");
+
+    if (!mainCamera) {
+      return false;
+    }
+
+    return this.isValidNumber(mainCamera.megapixel);
+  }
+
+  private readonly cameraSchema = z.any().refine(
+    (product: SmartPrixRecord) => {
+      const rearCameras =
+        product.normalizedSpecs?.extracted?.camera?.rearCamera || [];
+      return this.hasMainCameraWithValidMegapixel(rearCameras);
+    },
+    {
+      message: "Camera must have at least one main camera with valid megapixel",
+    }
+  );
+
   getCategoryName(): string {
     return "cameraQuality";
+  }
+
+  validateProduct(product: SmartPrixRecord): boolean {
+    const result = this.cameraSchema.safeParse(product);
+    return result.success;
   }
 
   prepareContext(

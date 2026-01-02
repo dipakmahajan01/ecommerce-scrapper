@@ -220,4 +220,5 @@ export interface CategoryProcessor {
   process(product: SmartPrixRecord, context: NormalizationContext): number; // Returns normalized score (0-1), must be between 0-1
   getCategoryName(): string;
   prepareContext(allProducts: SmartPrixRecord[]): Partial<NormalizationContext>;
+  validateProduct(product: SmartPrixRecord): boolean; // Returns true if product has required data for this processor
 }
