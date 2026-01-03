@@ -130,10 +130,10 @@ app.use((error: any, req: Request, res: Response) => {
 //     console.error(err);
 //     process.exit(1);
 // });
-scrapeProcessorTable("https://nanoreview.net/en/soc-list/rating").catch((err:any) => {
-    console.error(err);
-    process.exit(1);
-});
+// scrapeProcessorTable("https://nanoreview.net/en/soc-list/rating").catch((err:any) => {
+//     console.error(err);
+//     process.exit(1);
+// });
 // crawlAllRows('https://nanoreview.net/en/soc-list/rating').catch((err) => {
 //     console.error(err);
 //     process.exit(1);
