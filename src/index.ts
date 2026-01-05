@@ -5,17 +5,16 @@ import express, { Request, Response } from "express"; // NextFunction,
 import http from "http";
 import cors from "cors";
 import { StatusCodes } from "http-status-codes";
-import logger from "@src/lib/logger";
-import { logInfo, responseValidation } from "@src/lib";
-import productRoutes from "@src/routes/product/routes";
+import { logger, logInfo, responseValidation } from "./lib";
+import productRoutes from "./routes/product/routes";
 import {
   getProductDetails,
   scoreAndRankProductList,
-} from "@src/service/productRelevanceEngine";
+} from "./service/productRelevanceEngine";
 import {
   CategoryWeights,
   SmartPrixRecord,
-} from "@src/service/productRelevanceEngine/types";
+} from "./service/productRelevanceEngine/types";
 
 dotenv.config();
 

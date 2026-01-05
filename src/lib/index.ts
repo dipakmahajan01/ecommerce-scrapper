@@ -1,4 +1,4 @@
-/* eslint-disable import/export */
+import logger from "./logger";
 export * from "./utils";
-export * from "./logger/index";
+export { default as logger } from "./logger";
 export * from "./try-catch";
