@@ -9,7 +9,8 @@ import { scrapeFlipkartSearch } from "../service/scrapper";
 
 
 export const getProductList = async (req:Request, res:Response) => {
- const userQuery = (req.query.query as string) || "";
+  const userQuery = (req.query.query as string) || "";
+  console.log("userQuery", userQuery);
 
   if (!userQuery) {
     return res.status(400).json({ error: "Missing 'query' parameter" });
@@ -32,9 +33,12 @@ export const getProductList = async (req:Request, res:Response) => {
       maxPrice: parsed.maxPrice ?? undefined,
       minPrice: parsed.minPrice ?? undefined,
     });
+    console.log("flipkartUrl----------------->", flipkartUrl);
 
-    // 3) Scrape and return JSON
+    // 3) Scrape and return JSON (with automatic deduplication)
+    console.log(`[product] Starting scrape for URL: ${flipkartUrl}`);
     const products = await scrapeFlipkartSearch(flipkartUrl);
+    console.log(`[product] Scraping completed. Found ${products.length} unique products`);
 
     return res.json({
       query: {
@@ -47,6 +51,6 @@ export const getProductList = async (req:Request, res:Response) => {
     });
   } catch (err: any) {
     console.log("err",err);
-    return res.status(500).json({ error: "Failed to parse query or scrape Flipkart" });
+    return res.status(500).json({ error: "Failed to parse query or scrape Flipkart", details: err.message });
   }
 };

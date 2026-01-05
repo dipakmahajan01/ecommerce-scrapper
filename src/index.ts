@@ -724,6 +724,18 @@ app.use((error: any, req: Request, res: Response) => {
   );
 });
 
+// run().catch((err) => {
+//     console.error(err);
+//     process.exit(1);
+// });
+// scrapeProcessorTable("https://nanoreview.net/en/soc-list/rating").catch((err:any) => {
+//     console.error(err);
+//     process.exit(1);
+// });
+// crawlAllRows('https://nanoreview.net/en/soc-list/rating').catch((err) => {
+//     console.error(err);
+//     process.exit(1);
+// });
 process.on("unhandledRejection", function (reason, promise) {
   const errorMessage =
     reason instanceof Error

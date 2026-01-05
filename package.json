@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "prebuild": "rimraf dist",
+    "prebuild": "npx rimraf build",
     "start": "node build/server.js",
     "dev": "nodemon --ignore '*.json' src/server.ts",
     "ts": "tsnd --respawn src/server.ts",
