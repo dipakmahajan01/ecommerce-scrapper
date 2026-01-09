@@ -131,7 +131,7 @@ export async function generateCategoryWeights(
     }
 
     const { object } = await generateObject({
-      model: openrouter.chat("openai/gpt-4o-mini"),
+      model: openrouter.chat("openai/gpt-5.2"),
       temperature: 0,
       schema: WeightGenerationResponseSchema,
       prompt: `${SYSTEM_PROMPT}\n\nUser query: "${query}"`,
@@ -176,10 +176,7 @@ export async function generateCategoryWeights(
       };
     }
   } catch (error: any) {
-    console.error(
-      "[AI] Error generating category weights:",
-      JSON.parse(error.responseBody)
-    );
+    console.error("[AI] Error generating category weights:", error);
     throw new Error(
       `Failed to generate category weights: ${
         error instanceof Error ? error.message : "Unknown error"

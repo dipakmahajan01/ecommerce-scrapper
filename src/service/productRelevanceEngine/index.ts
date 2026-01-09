@@ -10,7 +10,7 @@ import {
 } from "./types";
 import { scoreAndRankProducts } from "./scoringEngine";
 
-export const getProductDetails = async (productList: { name: string }[]) => {
+export const getProductDetails = async (productList: { title: string }[]) => {
   const docs = getDeviceList();
   const dbProducts = Array.isArray(docs) ? docs : [];
 
@@ -23,7 +23,7 @@ export const getProductDetails = async (productList: { name: string }[]) => {
     let bestMatch: SmartPrixRecord | null = null;
     let bestScore = 0.0;
 
-    const productTokens = product.name
+    const productTokens = product.title
       .toLowerCase()
       .split(/\s+/)
       .filter(Boolean);
@@ -47,7 +47,7 @@ export const getProductDetails = async (productList: { name: string }[]) => {
     }
 
     return bestScore > 0.4 && bestMatch
-      ? { ...bestMatch, realTitle: product.name }
+      ? { ...bestMatch, realTitle: product.title }
       : null;
   });
 

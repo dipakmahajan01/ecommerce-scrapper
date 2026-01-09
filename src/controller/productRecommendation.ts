@@ -1,7 +1,15 @@
 import { Request, Response } from "express";
 import { getDeviceList } from "../service/getDeviceData";
-import { scoreAndRankProductList } from "../service/productRelevanceEngine";
+import {
+  getProductDetails,
+  scoreAndRankProductList,
+} from "../service/productRelevanceEngine";
 import { generateCategoryWeights } from "../service/ai/weightGenerator";
+import { parseUserQueryWithAI } from "../helpers/aiParser";
+import { parseUserQuery } from "../helpers/nlp";
+import { buildFlipkartSearchUrl } from "../helpers/flipkart";
+import { scrapeFlipkartSearch } from "../service/scrapper";
+import { SmartPrixRecord } from "src/service/productRelevanceEngine/types";
 
 export const getProductRecommendations = async (
   req: Request,
@@ -18,6 +26,25 @@ export const getProductRecommendations = async (
   }
 
   try {
+    let parsed;
+    try {
+      parsed = await parseUserQueryWithAI(userQuery);
+    } catch (aiErr: any) {
+      console.error(
+        "[product] AI parse failed, falling back to local NLP parser:",
+        aiErr?.message || aiErr
+      );
+      parsed = parseUserQuery(userQuery);
+    }
+
+    const flipkartUrl = buildFlipkartSearchUrl({
+      raw: userQuery,
+      productKeywords: parsed.productKeywords,
+      maxPrice: parsed.maxPrice ?? undefined,
+      minPrice: parsed.minPrice ?? undefined,
+    });
+    const products = await scrapeFlipkartSearch(flipkartUrl);
+
     const weightResult = await generateCategoryWeights(userQuery.trim());
 
     if (!weightResult.success) {
@@ -29,7 +56,7 @@ export const getProductRecommendations = async (
       });
     }
 
-    const allProducts = getDeviceList();
+    const allProducts = await getProductDetails(products as any);
 
     if (!allProducts || allProducts.length === 0) {
       return res.status(500).json({
@@ -39,7 +66,7 @@ export const getProductRecommendations = async (
     }
 
     const topProducts = scoreAndRankProductList(
-      allProducts,
+      allProducts as unknown as SmartPrixRecord[],
       weightResult.weights,
       20
     );

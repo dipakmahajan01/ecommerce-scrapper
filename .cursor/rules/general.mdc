@@ -4,5 +4,6 @@ globs: ["**/*.{js,ts,tsx,jsx,css,html,json}"]
 alwaysApply: true
 ---
 
-- For any function that requires three or more arguments, pass a single options object instead of multiple positional arguments.
-- Write comments only when necessary for clarity or explaining complex code; avoid unnecessary commenting.
+- For any function that takes three or more arguments, use a single options object as the parameter instead of passing arguments positionally.
+- Only write comments when essential for understanding the code or for explaining complex logic; avoid unnecessary or redundant comments.
+- Always ensure type safety. Rewrite any code using the 'any' type to use proper, explicit, and safe types. Do not use 'any' in type definitions or variable declarations.
