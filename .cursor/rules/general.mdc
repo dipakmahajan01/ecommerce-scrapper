@@ -6,4 +6,4 @@ alwaysApply: true
 
 - For any function that takes three or more arguments, use a single options object as the parameter instead of passing arguments positionally.
 - Only write comments when essential for understanding the code or for explaining complex logic; avoid unnecessary or redundant comments.
-- Always ensure type safety. Rewrite any code using the 'any' type to use proper, explicit, and safe types. Do not use 'any' in type definitions or variable declarations.
+- Always enforce type safety. Replace all instances of the 'any' type with explicit, precise, and safe types. Avoid using 'any' in both variable declarations and type definitions. Rely on your linter to detect TypeScript errors rather than using manual commands.

@@ -5,7 +5,7 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const OUT_PATH = path.join(__dirname, "../src/data/deviceList.json");
+const OUT_PATH = path.join(__dirname, "../data/deviceList.json");
 const COLLECTION = "smartprixresponses";
 const DB_NAME = "ecommerce-scrapper";
 

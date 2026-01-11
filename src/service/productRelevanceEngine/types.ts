@@ -123,24 +123,45 @@ export type ExtractedCamera = {
 };
 
 // ---- Technical/CPU ----
-export type GeekbenchBreakdown = {
+export type AntutuBreakdown = {
   CPU: string;
   GPU: string;
   Memory: string;
   UX: string;
-  "Total score"?: string; // TODO: fix this
+  totalScore: string;
   [key: string]: string | undefined;
 };
 
-export type Geekbench = {
+export type AntutuBenchmark = {
   total: string;
+  breakdown: AntutuBreakdown;
+};
+
+export type GeekbenchBreakdown = {
+  "Asset compression"?: string;
+  "HTML 5 Browser"?: string;
+  "PDF Renderer"?: string;
+  "Image detection"?: string;
+  HDR?: string;
+  "Background blur"?: string;
+  "Photo processing"?: string;
+  "Ray tracing"?: string;
+  [key: string]: string | undefined;
+};
+
+export type GeekbenchBenchmark = {
   breakdown: GeekbenchBreakdown;
+};
+
+export type BenchmarkData = {
+  antutu?: AntutuBenchmark;
+  geekbench?: GeekbenchBenchmark;
   [key: string]: unknown;
 };
 
 export type ExtractedTechnical = {
   chipset: string;
-  geekbench: Geekbench;
+  benchmark: BenchmarkData;
 };
 
 // ---- Combined Extracted Specs ----
@@ -222,3 +243,37 @@ export interface CategoryProcessor {
   prepareContext(allProducts: SmartPrixRecord[]): Partial<NormalizationContext>;
   validateProduct(product: SmartPrixRecord): boolean; // Returns true if product has required data for this processor
 }
+
+// =====================
+// Tracking Types
+// =====================
+
+export type TrackingStep = {
+  name: string;
+  details: Record<string, unknown>;
+  nextStep?: TrackingStep;
+};
+
+export type ProductTrackingEntry = {
+  details: Record<string, unknown>;
+  nextStep?: TrackingStep;
+};
+
+export type ProductTracking = {
+  [productTitle: string]: ProductTrackingEntry;
+};
+
+export type TrackingData = {
+  query: {
+    raw: string;
+    parsed: {
+      query: string;
+      maxPrice: number | null;
+      minPrice: number | null;
+      brands: string[] | null;
+      storage: string | null;
+      ram: string[] | null;
+    };
+  };
+  products: ProductTracking;
+};

@@ -2,7 +2,7 @@
 import puppeteer from "puppeteer";
 
 export interface Product {
-  title: string | null;
+  title: string;
   price: string | null;
   description: string | null;
   link: string | null;

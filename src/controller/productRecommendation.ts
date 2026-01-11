@@ -6,10 +6,13 @@ import {
 } from "../service/productRelevanceEngine";
 import { generateCategoryWeights } from "../service/ai/weightGenerator";
 import { parseUserQueryWithAI } from "../helpers/aiParser";
-import { parseUserQuery } from "../helpers/nlp";
 import { buildFlipkartSearchUrl } from "../helpers/flipkart";
 import { scrapeFlipkartSearch } from "../service/scrapper";
-import { SmartPrixRecord } from "src/service/productRelevanceEngine/types";
+import {
+  SmartPrixRecord,
+  ProductTrackingEntry,
+  TrackingData,
+} from "src/service/productRelevanceEngine/types";
 
 export const getProductRecommendations = async (
   req: Request,
@@ -25,51 +28,101 @@ export const getProductRecommendations = async (
     });
   }
 
-  try {
-    let parsed;
-    try {
-      parsed = await parseUserQueryWithAI(userQuery);
-    } catch (aiErr: any) {
-      console.error(
-        "[product] AI parse failed, falling back to local NLP parser:",
-        aiErr?.message || aiErr
-      );
-      parsed = parseUserQuery(userQuery);
-    }
+  const trackingMap = new Map<string, ProductTrackingEntry>();
 
-    const flipkartUrl = buildFlipkartSearchUrl({
-      raw: userQuery,
-      productKeywords: parsed.productKeywords,
-      maxPrice: parsed.maxPrice ?? undefined,
-      minPrice: parsed.minPrice ?? undefined,
-    });
+  try {
+    const parsed = await parseUserQueryWithAI(userQuery);
+    const flipkartUrl = buildFlipkartSearchUrl(parsed);
     const products = await scrapeFlipkartSearch(flipkartUrl);
+
+    for (const product of products) {
+      if (product.title) {
+        trackingMap.set(product.title, {
+          details: {
+            title: product.title,
+            price: product.price,
+            description: product.description,
+            link: product.link,
+            image: product.image,
+            rating: product.rating,
+          },
+        });
+      }
+    }
 
     const weightResult = await generateCategoryWeights(userQuery.trim());
 
     if (!weightResult.success) {
+      const tracking: TrackingData = {
+        query: {
+          raw: userQuery,
+          parsed: {
+            query: parsed.query,
+            maxPrice: parsed.maxPrice ?? null,
+            minPrice: parsed.minPrice ?? null,
+            brands: parsed.brands ?? null,
+            storage: parsed.storage ?? null,
+            ram: parsed.ram ?? null,
+          },
+        },
+        products: Object.fromEntries(trackingMap),
+      };
+
       return res.json({
         success: false,
         requiresClarification: true,
         query: userQuery,
         questions: weightResult.clarifyingQuestions.questions,
+        tracking,
       });
     }
 
-    const allProducts = await getProductDetails(products as any);
+    const allProducts = await getProductDetails(products, trackingMap);
 
     if (!allProducts || allProducts.length === 0) {
+      const tracking: TrackingData = {
+        query: {
+          raw: userQuery,
+          parsed: {
+            query: parsed.query,
+            maxPrice: parsed.maxPrice ?? null,
+            minPrice: parsed.minPrice ?? null,
+            brands: parsed.brands ?? null,
+            storage: parsed.storage ?? null,
+            ram: parsed.ram ?? null,
+          },
+        },
+        products: Object.fromEntries(trackingMap),
+      };
+
       return res.status(500).json({
         success: false,
         error: "No products available in the database",
+        tracking,
       });
     }
 
     const topProducts = scoreAndRankProductList(
-      allProducts as unknown as SmartPrixRecord[],
+      allProducts,
       weightResult.weights,
-      20
+      20,
+      trackingMap
     );
+
+    const tracking: TrackingData = {
+      query: {
+        raw: userQuery,
+        parsed: {
+          query: parsed.query,
+          maxPrice: parsed.maxPrice ?? null,
+          minPrice: parsed.minPrice ?? null,
+          brands: parsed.brands ?? null,
+          storage: parsed.storage ?? null,
+          ram: parsed.ram ?? null,
+        },
+      },
+      products: Object.fromEntries(trackingMap),
+    };
 
     return res.json({
       success: true,
@@ -77,12 +130,29 @@ export const getProductRecommendations = async (
       weights: weightResult.weights,
       products: topProducts,
       count: topProducts.length,
+      tracking,
     });
   } catch (error: any) {
     console.error("[ProductRecommendation] Error:", error);
+    const tracking: TrackingData = {
+      query: {
+        raw: userQuery,
+        parsed: {
+          query: "",
+          maxPrice: null,
+          minPrice: null,
+          brands: null,
+          storage: null,
+          ram: null,
+        },
+      },
+      products: Object.fromEntries(trackingMap),
+    };
+
     return res.status(500).json({
       success: false,
       error: error?.message || "Failed to generate product recommendations",
+      tracking,
     });
   }
 };

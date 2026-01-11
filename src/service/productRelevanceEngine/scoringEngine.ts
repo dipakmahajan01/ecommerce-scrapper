@@ -4,6 +4,8 @@ import {
   ProductCategoryScores,
   CategoryProcessor,
   NormalizationContext,
+  ProductTrackingEntry,
+  TrackingStep,
 } from "./types";
 import { getCategoryProcessors } from "./categoryProcessors";
 
@@ -23,7 +25,10 @@ function getProcessorMap(): Map<string, CategoryProcessor> {
  * Stage 1: Validation Pipeline
  * Filters products to keep only those that pass validation from ALL processors
  */
-function validateProducts(products: SmartPrixRecord[]): SmartPrixRecord[] {
+function validateProducts(
+  products: SmartPrixRecord[],
+  trackingMap?: Map<string, ProductTrackingEntry>
+): SmartPrixRecord[] {
   if (products.length === 0) {
     return [];
   }
@@ -31,7 +36,36 @@ function validateProducts(products: SmartPrixRecord[]): SmartPrixRecord[] {
   const processors = getCategoryProcessors();
   const validProducts = products.filter((product) => {
     // Product must pass validation from ALL processors
-    return processors.every((processor) => processor.validateProduct(product));
+    const isValid = processors.every((processor) =>
+      processor.validateProduct(product)
+    );
+
+    if (trackingMap) {
+      const productTitle =
+        (product as SmartPrixRecord & { realTitle?: string }).realTitle ||
+        product.title;
+      const trackingEntry = trackingMap.get(productTitle);
+      if (trackingEntry) {
+        const lastStep = getLastStep(trackingEntry);
+        if (lastStep) {
+          const failedProcessors = processors
+            .filter((processor) => !processor.validateProduct(product))
+            .map((processor) => processor.getCategoryName());
+
+          const validationStep: TrackingStep = {
+            name: "validation",
+            details: {
+              valid: isValid,
+              failedProcessors:
+                failedProcessors.length > 0 ? failedProcessors : [],
+            },
+          };
+          lastStep.nextStep = validationStep;
+        }
+      }
+    }
+
+    return isValid;
   });
 
   return validProducts;
@@ -160,14 +194,15 @@ export function scoreProduct(
 export function scoreAndRankProducts(
   products: SmartPrixRecord[],
   weights: CategoryWeights,
-  topN: number = 20
+  topN: number = 20,
+  trackingMap?: Map<string, ProductTrackingEntry>
 ) {
   if (products.length === 0) {
     return [];
   }
 
   // Stage 1: Validation Pipeline
-  const validProducts = validateProducts(products);
+  const validProducts = validateProducts(products, trackingMap);
   console.log("VALID PRODUCTS", products.length, "==", validProducts.length);
 
   if (validProducts.length === 0) {
@@ -178,10 +213,40 @@ export function scoreAndRankProducts(
   const context = buildNormalizationContext(validProducts);
 
   // Stage 3: Scoring Pipeline
-  const scoredProducts = validProducts.map((product) => ({
-    ...product,
-    categoryScores: scoreProduct(product, context, weights),
-  }));
+  const scoredProducts = validProducts.map((product) => {
+    const categoryScores = scoreProduct(product, context, weights);
+
+    if (trackingMap) {
+      const productTitle =
+        (product as SmartPrixRecord & { realTitle?: string }).realTitle ||
+        product.title;
+      const trackingEntry = trackingMap.get(productTitle);
+      if (trackingEntry) {
+        const lastStep = getLastStep(trackingEntry);
+        if (lastStep && "name" in lastStep) {
+          const scoringStep: TrackingStep = {
+            name: "scoring",
+            details: {
+              totalWeightedScore: categoryScores.totalWeightedScore,
+              categoryScores: {
+                batteryEndurance: categoryScores.batteryEndurance,
+                displayQuality: categoryScores.displayQuality,
+                cpuPerformance: categoryScores.cpuPerformance,
+                gpuPerformance: categoryScores.gpuPerformance,
+                cameraQuality: categoryScores.cameraQuality,
+              },
+            },
+          };
+          lastStep.nextStep = scoringStep;
+        }
+      }
+    }
+
+    return {
+      ...product,
+      categoryScores,
+    };
+  });
 
   // Sort by total weighted score (descending)
   scoredProducts.sort(

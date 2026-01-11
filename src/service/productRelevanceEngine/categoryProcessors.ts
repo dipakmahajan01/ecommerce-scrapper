@@ -429,7 +429,7 @@ export class DisplayQualityProcessor extends BaseCategoryProcessor {
 
 /**
  * CPU Performance Processor (Weight: cpuPerformance)
- * Uses: technical.geekbench.breakdown.CPU
+ * Uses: technical.benchmark.antutu.breakdown.CPU
  */
 export class CPUPerformanceProcessor extends BaseCategoryProcessor {
   private isParseableNumberString(value: unknown): boolean {
@@ -440,13 +440,13 @@ export class CPUPerformanceProcessor extends BaseCategoryProcessor {
 
   private readonly cpuSchema = z.any().refine(
     (product: SmartPrixRecord) => {
-      const cpuGeekbenchScore =
-        product.normalizedSpecs?.extracted?.technical?.geekbench?.breakdown
-          ?.CPU;
-      return this.isParseableNumberString(cpuGeekbenchScore);
+      const cpuBenchmarkScore =
+        product.normalizedSpecs?.extracted?.technical?.benchmark?.antutu
+          ?.breakdown?.CPU;
+      return this.isParseableNumberString(cpuBenchmarkScore);
     },
     {
-      message: "CPU Geekbench score must be a parseable number string",
+      message: "CPU benchmark score must be a parseable number string",
     }
   );
 
@@ -465,7 +465,7 @@ export class CPUPerformanceProcessor extends BaseCategoryProcessor {
     const values = allProducts
       .map((p) => {
         const scoreStr =
-          p.normalizedSpecs.extracted.technical.geekbench.breakdown.CPU;
+          p.normalizedSpecs.extracted.technical.benchmark.antutu.breakdown.CPU;
         return typeof scoreStr === "string" ? parseFloat(scoreStr) : null;
       })
       .filter((v): v is number => v !== null && !isNaN(v));
@@ -484,7 +484,8 @@ export class CPUPerformanceProcessor extends BaseCategoryProcessor {
 
   process(product: SmartPrixRecord, context: NormalizationContext): number {
     const cpuScoreStr =
-      product.normalizedSpecs.extracted.technical.geekbench.breakdown.CPU;
+      product.normalizedSpecs.extracted.technical.benchmark.antutu.breakdown
+        .CPU;
     const cpuScore =
       typeof cpuScoreStr === "string" ? parseFloat(cpuScoreStr) : null;
 
@@ -498,7 +499,7 @@ export class CPUPerformanceProcessor extends BaseCategoryProcessor {
 
 /**
  * GPU Performance Processor (Weight: gpuPerformance)
- * Uses: technical.geekbench.breakdown.GPU
+ * Uses: technical.benchmark.antutu.breakdown.GPU
  */
 export class GPUPerformanceProcessor extends BaseCategoryProcessor {
   private isParseableNumberString(value: unknown): boolean {
@@ -509,13 +510,13 @@ export class GPUPerformanceProcessor extends BaseCategoryProcessor {
 
   private readonly gpuSchema = z.any().refine(
     (product: SmartPrixRecord) => {
-      const gpuGeekbenchScore =
-        product.normalizedSpecs?.extracted?.technical?.geekbench?.breakdown
-          ?.GPU;
-      return this.isParseableNumberString(gpuGeekbenchScore);
+      const gpuBenchmarkScore =
+        product.normalizedSpecs?.extracted?.technical?.benchmark?.antutu
+          ?.breakdown?.GPU;
+      return this.isParseableNumberString(gpuBenchmarkScore);
     },
     {
-      message: "GPU Geekbench score must be a parseable number string",
+      message: "GPU benchmark score must be a parseable number string",
     }
   );
 
@@ -534,7 +535,7 @@ export class GPUPerformanceProcessor extends BaseCategoryProcessor {
     const values = allProducts
       .map((p) => {
         const scoreStr =
-          p.normalizedSpecs.extracted.technical.geekbench.breakdown.GPU;
+          p.normalizedSpecs.extracted.technical.benchmark.antutu.breakdown.GPU;
         return typeof scoreStr === "string" ? parseFloat(scoreStr) : null;
       })
       .filter((v): v is number => v !== null && !isNaN(v));
@@ -553,7 +554,8 @@ export class GPUPerformanceProcessor extends BaseCategoryProcessor {
 
   process(product: SmartPrixRecord, context: NormalizationContext): number {
     const gpuScoreStr =
-      product.normalizedSpecs.extracted.technical.geekbench.breakdown.GPU;
+      product.normalizedSpecs.extracted.technical.benchmark.antutu.breakdown
+        .GPU;
     const gpuScore =
       typeof gpuScoreStr === "string" ? parseFloat(gpuScoreStr) : null;
 

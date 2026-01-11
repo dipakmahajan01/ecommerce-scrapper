@@ -7,10 +7,15 @@ import {
   StatKey,
   CategoryWeights,
   ProductCategoryScores,
+  ProductTrackingEntry,
+  TrackingStep,
 } from "./types";
 import { scoreAndRankProducts } from "./scoringEngine";
 
-export const getProductDetails = async (productList: { title: string }[]) => {
+export const getProductDetails = async (
+  productList: { title: string }[],
+  trackingMap?: Map<string, ProductTrackingEntry>
+) => {
   const docs = getDeviceList();
   const dbProducts = Array.isArray(docs) ? docs : [];
 
@@ -23,7 +28,8 @@ export const getProductDetails = async (productList: { title: string }[]) => {
     let bestMatch: SmartPrixRecord | null = null;
     let bestScore = 0.0;
 
-    const productTokens = product.title
+    const cleanedTitle = product.title.replace(/\s*\([^)]*\)/g, "");
+    const productTokens = cleanedTitle
       .toLowerCase()
       .split(/\s+/)
       .filter(Boolean);
@@ -40,9 +46,29 @@ export const getProductDetails = async (productList: { title: string }[]) => {
       const score = intersectionSize / unionSize;
 
       if (score > bestScore) {
-        // Ensure dbProd has FullSpecsResult shape, then add realTitle separately for return type
         bestScore = score;
         bestMatch = dbProd;
+      }
+    }
+
+    if (trackingMap) {
+      const trackingEntry = trackingMap.get(product.title);
+      if (trackingEntry) {
+        const dbMatchStep: TrackingStep = {
+          name: "dbMatch",
+          details: {
+            matched: bestScore > 0.4 && bestMatch !== null,
+            score: bestScore,
+            dbProduct: bestMatch || null,
+            reason:
+              bestScore > 0.4 && bestMatch
+                ? undefined
+                : bestScore <= 0.4
+                ? `Match score ${bestScore} below threshold 0.4`
+                : "No matching product found in database",
+          },
+        };
+        trackingEntry.nextStep = dbMatchStep;
       }
     }
 
@@ -59,7 +85,8 @@ export const getProductDetails = async (productList: { title: string }[]) => {
 export const scoreAndRankProductList = (
   productList: SmartPrixRecord[],
   weights: CategoryWeights,
-  topN: number = 20
+  topN: number = 20,
+  trackingMap?: Map<string, ProductTrackingEntry>
 ) => {
-  return scoreAndRankProducts(productList, weights, topN);
+  return scoreAndRankProducts(productList, weights, topN, trackingMap);
 };
