@@ -154,8 +154,8 @@ export type GeekbenchBenchmark = {
 };
 
 export type BenchmarkData = {
-  antutu?: AntutuBenchmark;
-  geekbench?: GeekbenchBenchmark;
+  antutu: AntutuBenchmark;
+  geekbench: GeekbenchBenchmark;
   [key: string]: unknown;
 };
 

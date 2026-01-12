@@ -22,6 +22,20 @@ function getProcessorMap(): Map<string, CategoryProcessor> {
 }
 
 /**
+ * Traverses the tracking entry chain to find the last step
+ */
+function getLastStep(trackingEntry: ProductTrackingEntry): TrackingStep | null {
+  if (!trackingEntry.nextStep) {
+    return null;
+  }
+  let current: TrackingStep | undefined = trackingEntry.nextStep;
+  while (current?.nextStep) {
+    current = current.nextStep;
+  }
+  return current || null;
+}
+
+/**
  * Stage 1: Validation Pipeline
  * Filters products to keep only those that pass validation from ALL processors
  */
