@@ -18,7 +18,9 @@ export const getProductList = async (req: Request, res: Response) => {
 
     // 3) Scrape and return JSON (with automatic deduplication)
     console.log(`[product] Starting scrape for URL: ${flipkartUrl}`);
-    const products = await scrapeFlipkartSearch(flipkartUrl);
+    const products = await scrapeFlipkartSearch({
+      url: flipkartUrl,
+    });
     console.log(
       `[product] Scraping completed. Found ${products.length} unique products`
     );
@@ -34,11 +36,9 @@ export const getProductList = async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     console.log("err", err);
-    return res
-      .status(500)
-      .json({
-        error: "Failed to parse query or scrape Flipkart",
-        details: err.message,
-      });
+    return res.status(500).json({
+      error: "Failed to parse query or scrape Flipkart",
+      details: err.message,
+    });
   }
 };

@@ -1,18 +1,13 @@
 import { Request, Response } from "express";
 import { getDeviceList } from "../service/getDeviceData";
-import {
-  getProductDetails,
-  scoreAndRankProductList,
-} from "../service/productRelevanceEngine";
+import { scoreAndRankProductList } from "../service/productRelevanceEngine";
 import { generateCategoryWeights } from "../service/ai/weightGenerator";
 import { parseUserQueryWithAI } from "../helpers/aiParser";
-import { buildFlipkartSearchUrl } from "../helpers/flipkart";
-import { scrapeFlipkartSearch } from "../service/scrapper";
 import {
-  SmartPrixRecord,
   ProductTrackingEntry,
   TrackingData,
 } from "src/service/productRelevanceEngine/types";
+import { UserQueryModel } from "../models/userQuery";
 
 export const getProductRecommendations = async (
   req: Request,
@@ -32,23 +27,6 @@ export const getProductRecommendations = async (
 
   try {
     const parsed = await parseUserQueryWithAI(userQuery);
-    const flipkartUrl = buildFlipkartSearchUrl(parsed);
-    const products = await scrapeFlipkartSearch(flipkartUrl);
-
-    for (const product of products) {
-      if (product.title) {
-        trackingMap.set(product.title, {
-          details: {
-            title: product.title,
-            price: product.price,
-            description: product.description,
-            link: product.link,
-            image: product.image,
-            rating: product.rating,
-          },
-        });
-      }
-    }
 
     const weightResult = await generateCategoryWeights(userQuery.trim());
 
@@ -77,7 +55,34 @@ export const getProductRecommendations = async (
       });
     }
 
-    const allProducts = await getProductDetails(products, trackingMap);
+    const allDevices = getDeviceList() ?? [];
+    const filteredDevices = allDevices.filter((device) => {
+      if (device.price == null) return false;
+      if (parsed.minPrice != null && device.price < parsed.minPrice)
+        return false;
+      if (parsed.maxPrice != null && device.price > parsed.maxPrice)
+        return false;
+      return true;
+    });
+
+    for (const device of filteredDevices) {
+      trackingMap.set(device.title, {
+        details: {
+          title: device.title,
+          price: device.price,
+          link: device.link,
+          brand: device.brand,
+        },
+      });
+    }
+
+    const allProducts = filteredDevices.map((device) => ({
+      ...device,
+      realTitle: device.title,
+      flipkartLink: null,
+      flipkartImage: null,
+      dbRecordId: device._id,
+    }));
 
     if (!allProducts || allProducts.length === 0) {
       const tracking: TrackingData = {
@@ -109,6 +114,20 @@ export const getProductRecommendations = async (
       trackingMap
     );
 
+    let savedId: string | null = null;
+    try {
+      const savedQuery = await UserQueryModel.create({
+        query: userQuery,
+        products: topProducts,
+      });
+      savedId = savedQuery._id.toString();
+    } catch (saveError) {
+      console.error(
+        "[ProductRecommendation] Error saving to database:",
+        saveError
+      );
+    }
+
     const tracking: TrackingData = {
       query: {
         raw: userQuery,
@@ -126,9 +145,15 @@ export const getProductRecommendations = async (
 
     return res.json({
       success: true,
+      id: savedId,
       query: userQuery,
       weights: weightResult.weights,
       products: topProducts,
+      format: topProducts.map((item) => ({
+        title: item.title,
+        link: item.flipkartLink,
+        score: item.totalWeightedScore,
+      })),
       count: topProducts.length,
       tracking,
     });

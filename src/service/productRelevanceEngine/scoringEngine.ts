@@ -6,6 +6,8 @@ import {
   NormalizationContext,
   ProductTrackingEntry,
   TrackingStep,
+  EnrichedProduct,
+  ScoredProduct,
 } from "./types";
 import { getCategoryProcessors } from "./categoryProcessors";
 
@@ -40,9 +42,9 @@ function getLastStep(trackingEntry: ProductTrackingEntry): TrackingStep | null {
  * Filters products to keep only those that pass validation from ALL processors
  */
 function validateProducts(
-  products: SmartPrixRecord[],
+  products: EnrichedProduct[],
   trackingMap?: Map<string, ProductTrackingEntry>
-): SmartPrixRecord[] {
+) {
   if (products.length === 0) {
     return [];
   }
@@ -55,9 +57,7 @@ function validateProducts(
     );
 
     if (trackingMap) {
-      const productTitle =
-        (product as SmartPrixRecord & { realTitle?: string }).realTitle ||
-        product.title;
+      const productTitle = product.realTitle || product.title;
       const trackingEntry = trackingMap.get(productTitle);
       if (trackingEntry) {
         const lastStep = getLastStep(trackingEntry);
@@ -89,7 +89,7 @@ function validateProducts(
  * Build complete normalization context from all products
  */
 function buildNormalizationContext(
-  allProducts: SmartPrixRecord[]
+  allProducts: EnrichedProduct[]
 ): NormalizationContext {
   const processors = getCategoryProcessors();
   const context: Partial<NormalizationContext> = {};
@@ -113,6 +113,8 @@ function buildNormalizationContext(
     gpuScore: context.gpuScore || { min: 0, max: 1 },
     cameraMainMp: context.cameraMainMp || { min: 0, max: 1 },
     // cameraCount: context.cameraCount || { min: 1, max: 1 },
+    ramCapacity: context.ramCapacity || { min: 0, max: 1 },
+    romCapacity: context.romCapacity || { min: 0, max: 1 },
   };
 }
 
@@ -120,7 +122,7 @@ function buildNormalizationContext(
  * Score a single product across all categories
  */
 export function scoreProduct(
-  product: SmartPrixRecord,
+  product: EnrichedProduct,
   context: NormalizationContext,
   weights: CategoryWeights
 ): ProductCategoryScores {
@@ -133,6 +135,8 @@ export function scoreProduct(
   const cpuProcessor = processorMap.get("cpuPerformance")!;
   const gpuProcessor = processorMap.get("gpuPerformance")!;
   const cameraProcessor = processorMap.get("cameraQuality")!;
+  const ramProcessor = processorMap.get("ramCapacity")!;
+  const romProcessor = processorMap.get("romCapacity")!;
 
   const batteryRaw = batteryProcessor.process(product, context);
   // const softwareRaw = softwareProcessor.process(product, context);
@@ -140,6 +144,8 @@ export function scoreProduct(
   const cpuRaw = cpuProcessor.process(product, context);
   const gpuRaw = gpuProcessor.process(product, context);
   const cameraRaw = cameraProcessor.process(product, context);
+  const ramRaw = ramProcessor.process(product, context);
+  const romRaw = romProcessor.process(product, context);
 
   // Get weights (use as-is, formula: Score = Σ(w_i * n_i))
   const batteryWeight = weights.batteryEndurance;
@@ -148,6 +154,8 @@ export function scoreProduct(
   const cpuWeight = weights.cpuPerformance;
   const gpuWeight = weights.gpuPerformance;
   const cameraWeight = weights.cameraQuality;
+  const ramWeight = weights.ramCapacity;
+  const romWeight = weights.romCapacity;
 
   // Calculate weighted scores
   const batteryWeighted = batteryRaw * batteryWeight;
@@ -156,6 +164,8 @@ export function scoreProduct(
   const cpuWeighted = cpuRaw * cpuWeight;
   const gpuWeighted = gpuRaw * gpuWeight;
   const cameraWeighted = cameraRaw * cameraWeight;
+  const ramWeighted = ramRaw * ramWeight;
+  const romWeighted = romRaw * romWeight;
 
   // Total weighted score: Σ(w_i * n_i)
   const totalWeightedScore =
@@ -164,7 +174,9 @@ export function scoreProduct(
     displayWeighted +
     cpuWeighted +
     gpuWeighted +
-    cameraWeighted;
+    cameraWeighted +
+    ramWeighted +
+    romWeighted;
 
   return {
     batteryEndurance: {
@@ -197,6 +209,16 @@ export function scoreProduct(
       rawScore: cameraRaw,
       weightedScore: cameraWeighted,
     },
+    ramCapacity: {
+      category: "ramCapacity",
+      rawScore: ramRaw,
+      weightedScore: ramWeighted,
+    },
+    romCapacity: {
+      category: "romCapacity",
+      rawScore: romRaw,
+      weightedScore: romWeighted,
+    },
     totalWeightedScore,
   };
 }
@@ -206,7 +228,7 @@ export function scoreProduct(
  * Pipeline: Validation → Context Building → Scoring
  */
 export function scoreAndRankProducts(
-  products: SmartPrixRecord[],
+  products: EnrichedProduct[],
   weights: CategoryWeights,
   topN: number = 20,
   trackingMap?: Map<string, ProductTrackingEntry>
@@ -231,9 +253,7 @@ export function scoreAndRankProducts(
     const categoryScores = scoreProduct(product, context, weights);
 
     if (trackingMap) {
-      const productTitle =
-        (product as SmartPrixRecord & { realTitle?: string }).realTitle ||
-        product.title;
+      const productTitle = product.realTitle || product.title;
       const trackingEntry = trackingMap.get(productTitle);
       if (trackingEntry) {
         const lastStep = getLastStep(trackingEntry);
@@ -248,6 +268,8 @@ export function scoreAndRankProducts(
                 cpuPerformance: categoryScores.cpuPerformance,
                 gpuPerformance: categoryScores.gpuPerformance,
                 cameraQuality: categoryScores.cameraQuality,
+                ramCapacity: categoryScores.ramCapacity,
+                romCapacity: categoryScores.romCapacity,
               },
             },
           };
@@ -269,11 +291,16 @@ export function scoreAndRankProducts(
   );
 
   // Return top N
-  return scoredProducts.slice(0, topN).map((product) => ({
-    link: product.link,
-    title: product.title,
-    brand: product.brand,
-    extracted: product.normalizedSpecs?.extracted,
-    ...product.categoryScores,
-  }));
+  return scoredProducts.slice(0, topN).map((product) => {
+    return {
+      link: product.link,
+      title: product.title,
+      brand: product.brand,
+      extracted: product.normalizedSpecs?.extracted,
+      flipkartLink: product.flipkartLink,
+      flipkartImage: product.flipkartImage,
+      dbRecordId: product.dbRecordId,
+      ...product.categoryScores,
+    };
+  });
 }

@@ -567,6 +567,162 @@ export class GPUPerformanceProcessor extends BaseCategoryProcessor {
   }
 }
 
+export class RAMCapacityProcessor extends BaseCategoryProcessor {
+  private parseRAMValue(ramString: unknown): number | null {
+    if (typeof ramString !== "string" || !ramString.trim()) {
+      return null;
+    }
+
+    const match = ramString.match(/(\d+(?:\.\d+)?)\s*GB/i);
+    if (!match) {
+      return null;
+    }
+
+    const value = parseFloat(match[1]);
+    if (isNaN(value) || !isFinite(value) || value <= 0) {
+      return null;
+    }
+
+    return value;
+  }
+
+  private readonly ramSchema = z.any().refine(
+    (product: SmartPrixRecord) => {
+      const ramString = product.normalizedSpecs?.specs?.memory?.ram;
+      const ramValue = this.parseRAMValue(ramString);
+      return ramValue !== null;
+    },
+    {
+      message:
+        "RAM value must be a parseable string in GB format (e.g., '16 GB')",
+    }
+  );
+
+  getCategoryName(): string {
+    return "ramCapacity";
+  }
+
+  validateProduct(product: SmartPrixRecord): boolean {
+    const result = this.ramSchema.safeParse(product);
+    return result.success;
+  }
+
+  prepareContext(
+    allProducts: SmartPrixRecord[]
+  ): Partial<NormalizationContext> {
+    const values = allProducts
+      .map((p) => {
+        const ramString = p.normalizedSpecs.specs?.memory?.ram;
+        return this.parseRAMValue(ramString);
+      })
+      .filter((v): v is number => v !== null);
+
+    if (values.length === 0) {
+      return { ramCapacity: { min: 0, max: 1 } };
+    }
+
+    return {
+      ramCapacity: {
+        min: Math.min(...values),
+        max: Math.max(...values),
+      },
+    };
+  }
+
+  process(product: SmartPrixRecord, context: NormalizationContext): number {
+    const ramString = product.normalizedSpecs.specs?.memory?.ram;
+    const ramValue = this.parseRAMValue(ramString);
+
+    return this.normalizeValue(
+      ramValue,
+      context.ramCapacity.min,
+      context.ramCapacity.max
+    );
+  }
+}
+
+export class ROMCapacityProcessor extends BaseCategoryProcessor {
+  private parseROMValue(storageString: unknown): number | null {
+    if (typeof storageString !== "string" || !storageString.trim()) {
+      return null;
+    }
+
+    const tbMatch = storageString.match(/(\d+(?:\.\d+)?)\s*TB/i);
+    if (tbMatch) {
+      const value = parseFloat(tbMatch[1]);
+      if (isNaN(value) || !isFinite(value) || value <= 0) {
+        return null;
+      }
+      return value * 1024;
+    }
+
+    const gbMatch = storageString.match(/(\d+(?:\.\d+)?)\s*GB/i);
+    if (gbMatch) {
+      const value = parseFloat(gbMatch[1]);
+      if (isNaN(value) || !isFinite(value) || value <= 0) {
+        return null;
+      }
+      return value;
+    }
+
+    return null;
+  }
+
+  private readonly romSchema = z.any().refine(
+    (product: SmartPrixRecord) => {
+      const storageString = product.normalizedSpecs?.specs?.memory?.storage;
+      const romValue = this.parseROMValue(storageString);
+      return romValue !== null;
+    },
+    {
+      message:
+        "Storage value must be a parseable string in GB or TB format (e.g., '512 GB' or '1 TB')",
+    }
+  );
+
+  getCategoryName(): string {
+    return "romCapacity";
+  }
+
+  validateProduct(product: SmartPrixRecord): boolean {
+    const result = this.romSchema.safeParse(product);
+    return result.success;
+  }
+
+  prepareContext(
+    allProducts: SmartPrixRecord[]
+  ): Partial<NormalizationContext> {
+    const values = allProducts
+      .map((p) => {
+        const storageString = p.normalizedSpecs.specs?.memory?.storage;
+        return this.parseROMValue(storageString);
+      })
+      .filter((v): v is number => v !== null);
+
+    if (values.length === 0) {
+      return { romCapacity: { min: 0, max: 1 } };
+    }
+
+    return {
+      romCapacity: {
+        min: Math.min(...values),
+        max: Math.max(...values),
+      },
+    };
+  }
+
+  process(product: SmartPrixRecord, context: NormalizationContext): number {
+    const storageString = product.normalizedSpecs.specs?.memory?.storage;
+    const romValue = this.parseROMValue(storageString);
+
+    return this.normalizeValue(
+      romValue,
+      context.romCapacity.min,
+      context.romCapacity.max
+    );
+  }
+}
+
 /**
  * Camera Quality Processor (Weight: cameraQuality)
  * Uses: camera.rearCamera (megapixel, camera type: main/ultrawide/telephoto/macro)
@@ -720,5 +876,7 @@ export function getCategoryProcessors(): CategoryProcessor[] {
     new CPUPerformanceProcessor(),
     new GPUPerformanceProcessor(),
     new CameraQualityProcessor(),
+    new RAMCapacityProcessor(),
+    new ROMCapacityProcessor(),
   ];
 }

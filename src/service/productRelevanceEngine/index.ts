@@ -9,11 +9,14 @@ import {
   ProductCategoryScores,
   ProductTrackingEntry,
   TrackingStep,
+  ScrapedProduct,
+  EnrichedProduct,
+  ScoredProduct,
 } from "./types";
 import { scoreAndRankProducts } from "./scoringEngine";
 
 export const getProductDetails = async (
-  productList: { title: string }[],
+  productList: ScrapedProduct[],
   trackingMap?: Map<string, ProductTrackingEntry>
 ) => {
   const docs = getDeviceList();
@@ -73,17 +76,21 @@ export const getProductDetails = async (
     }
 
     return bestScore > 0.4 && bestMatch
-      ? { ...bestMatch, realTitle: product.title }
+      ? {
+          ...bestMatch,
+          realTitle: product.title,
+          flipkartLink: product.link || null,
+          flipkartImage: product.image || null,
+          dbRecordId: bestMatch._id,
+        }
       : null;
   });
 
-  return enrichedList.filter(
-    (x): x is SmartPrixRecord & { realTitle: string } => x !== null
-  );
+  return enrichedList.filter((x): x is EnrichedProduct => x !== null);
 };
 
 export const scoreAndRankProductList = (
-  productList: SmartPrixRecord[],
+  productList: EnrichedProduct[],
   weights: CategoryWeights,
   topN: number = 20,
   trackingMap?: Map<string, ProductTrackingEntry>

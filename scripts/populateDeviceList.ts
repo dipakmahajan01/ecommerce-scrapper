@@ -30,7 +30,14 @@ async function run() {
   console.log("Fetching devices from the database...");
   const devices = await db
     .collection(COLLECTION)
-    .find({}, { projection: { _id: 0, html: 0 } })
+    .find(
+      {
+        "parseHtmlSpec.meta.lifecycle": {
+          $in: ["unknown", "considerable"],
+        },
+      },
+      { projection: { html: 0 } }
+    )
     .toArray();
 
   const deviceCount = devices ? devices.length : 0;

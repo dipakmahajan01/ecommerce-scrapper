@@ -159,11 +159,15 @@ async function scrapePage(page: any): Promise<Product[]> {
   return pageResults;
 }
 
-export async function scrapeFlipkartSearch(
-  url: string,
+export async function scrapeFlipkartSearch({
+  url,
   retryCount = 0,
-  maxPages = 4
-): Promise<Product[]> {
+  maxPages = 4,
+}: {
+  url: string;
+  retryCount?: number;
+  maxPages?: number;
+}): Promise<Product[]> {
   const results: Product[] = [];
   const MAX_RETRIES = 2;
   let browser: any = null;
@@ -556,7 +560,7 @@ export async function scrapeFlipkartSearch(
     );
     // Wait a bit before retrying
     await new Promise((resolve) => setTimeout(resolve, 2000));
-    return scrapeFlipkartSearch(url, retryCount + 1);
+    return scrapeFlipkartSearch({ url: url, retryCount: retryCount + 1 });
   }
 
   // Remove duplicate models based on same color and RAM

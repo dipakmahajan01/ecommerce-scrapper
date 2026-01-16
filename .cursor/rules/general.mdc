@@ -6,4 +6,6 @@ alwaysApply: true
 
 - For any function that takes three or more arguments, use a single options object as the parameter instead of passing arguments positionally.
 - Only write comments when essential for understanding the code or for explaining complex logic; avoid unnecessary or redundant comments.
+- Comments should always explain why the code exists or is written a certain way, not just how it works. The reasoning (why) is not directly evident from code inspection, whereas the mechanics (how) can be inferred.
 - Always enforce type safety. Replace all instances of the 'any' type with explicit, precise, and safe types. Avoid using 'any' in both variable declarations and type definitions. Rely on your linter to detect TypeScript errors rather than using manual commands.
+- The use of 'any' type and TypeScript type assertions ('as') is strictly prohibited, except in critical scenarios where no other safe alternative exists. Keep the types as single source of truth

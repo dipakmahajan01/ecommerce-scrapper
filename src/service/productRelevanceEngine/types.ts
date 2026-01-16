@@ -32,9 +32,11 @@ export type FullSpecsResult = {
 };
 
 export type SmartPrixRecord = {
+  _id: string;
   link: string;
   title: string;
   brand?: string;
+  price?: number;
   success: boolean;
   html?: string;
   parseHtmlSpec: FullSpecsResult;
@@ -202,6 +204,8 @@ export type CategoryWeights = {
   cpuPerformance: number;
   gpuPerformance: number;
   cameraQuality: number;
+  ramCapacity: number;
+  romCapacity: number;
 };
 
 export type CategoryScore = {
@@ -217,8 +221,33 @@ export type ProductCategoryScores = {
   cpuPerformance: CategoryScore;
   gpuPerformance: CategoryScore;
   cameraQuality: CategoryScore;
+  ramCapacity: CategoryScore;
+  romCapacity: CategoryScore;
   totalWeightedScore: number;
 };
+
+export type ScrapedProduct = {
+  title: string;
+  link?: string | null;
+  image?: string | null;
+};
+
+export type EnrichedProduct = SmartPrixRecord & {
+  realTitle: string;
+  flipkartLink: string | null;
+  flipkartImage: string | null;
+  dbRecordId: string;
+};
+
+export type ScoredProduct = {
+  link: string;
+  title: string;
+  brand?: string;
+  extracted: ExtractedSpecs;
+  flipkartLink: string | null;
+  flipkartImage: string | null;
+  dbRecordId: string;
+} & ProductCategoryScores;
 
 /**
  * Normalization context with pre-calculated min/max values for performance
@@ -235,6 +264,8 @@ export type NormalizationContext = {
   gpuScore: { min: number; max: number };
   cameraMainMp: { min: number; max: number };
   // cameraCount: { min: number; max: number };
+  ramCapacity: { min: number; max: number };
+  romCapacity: { min: number; max: number };
 };
 
 export interface CategoryProcessor {
@@ -277,3 +308,12 @@ export type TrackingData = {
   };
   products: ProductTracking;
 };
+
+// =====================
+// API Response Types
+// =====================
+
+export interface ProductRecommendationResponse {
+  id: string;
+  products: ScoredProduct[];
+}
