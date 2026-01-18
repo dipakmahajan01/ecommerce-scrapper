@@ -35,7 +35,7 @@ export async function scrapeFlipkartSearch(url: string): Promise<Product[]> {
           card.find("div.XQDdHH").first().text().trim() ||
           card.find("span.Y1HWO0").first().text().trim() ||
           null;
-        const details:any = [];
+        const details: any = [];
         card.find("ul.G4BRas li.Jigdf").each((_, li) => {
           details.push($(li).text().trim());
         });
@@ -56,4 +56,3 @@ export async function scrapeFlipkartSearch(url: string): Promise<Product[]> {
   await crawler.run([url]);
   return results;
 }
-

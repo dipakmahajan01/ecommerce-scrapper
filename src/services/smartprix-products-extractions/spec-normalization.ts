@@ -79,9 +79,14 @@ export type ExtractedCamera = {
 };
 
 // Technical/CPU extraction types
+export type BenchmarkData = {
+  antutu?: { total?: string | null; breakdown?: Record<string, string> } | null;
+  geekbench?: { breakdown?: Record<string, string> } | null;
+};
+
 export type ExtractedTechnical = {
   chipset: string;
-  geekbench: Record<string, unknown>; // As per structure of .antutu
+  benchmark: BenchmarkData;
 };
 
 // All extracted values type
@@ -92,13 +97,56 @@ export type ExtractedSpecs = {
   technical?: ExtractedTechnical;
 };
 
-function norm(s: string) {
-  return s.toLowerCase().replace(/[^a-z0-9]/g, ""); // kill spaces, dashes, everything
+// ======================
+// SCORE V4 — N-GRAM MATCH
+// ======================
+
+function normalizeNgram(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/®|™|\(|\)/g, "")
+    .replace(/[^a-z0-9]/g, "") // remove spaces too
+    .trim();
 }
 
-function matchChip(title: string, input: string): boolean {
-  return norm(title).includes(norm(input));
+function ngrams(str: string, n = 4): string[] {
+  const grams: string[] = [];
+  if (str.length < n) return grams;
+  for (let i = 0; i <= str.length - n; i++) {
+    grams.push(str.slice(i, i + n));
+  }
+  return grams;
 }
+
+function score_v4(title: string, input: string, n = 4): number {
+  const A = normalizeNgram(title);
+  const B = normalizeNgram(input);
+  if (!A || !B) return 0;
+
+  const minLength = Math.min(A.length, B.length);
+  let adaptiveN = n;
+  if (minLength < 15) {
+    adaptiveN = 2;
+  } else if (minLength < 30) {
+    adaptiveN = 3;
+  } else {
+    adaptiveN = 4;
+  }
+
+  const gA = ngrams(A, adaptiveN);
+  const gB = ngrams(B, adaptiveN);
+  if (!gA.length || !gB.length) return 0;
+  const setA = new Set(gA);
+  const setB = new Set(gB);
+  let intersection = 0;
+  for (const g of setA) {
+    if (setB.has(g)) intersection++;
+  }
+  const union = setA.size + setB.size - intersection;
+  return union === 0 ? 0 : intersection / union; // Jaccard
+}
+
+// ======================
 
 function extractBrightness(input: string): BrightnessValue {
   if (!input) return null;
@@ -268,48 +316,75 @@ function extractDisplay(displayDesc: any): ExtractedDisplay | null {
 
   const DISPLAY_TYPE = [
     {
-      type: "Micro-LED",
+      type: "LTPO AMOLED",
       score: 10,
-      keywords: ["micro-led", "micro led", "microled"],
+      keywords: ["ltpo amoled", "ltpo oled", "proxdr", "pro xdr"],
     },
-    { type: "QD-OLED", score: 9, keywords: ["qd-oled", "qd oled"] },
-    {
-      type: "Micro-OLED",
-      score: 9,
-      keywords: ["micro-oled", "micro oled", "microoled"],
-    },
-
     {
       type: "Dynamic AMOLED 2X",
-      score: 8.6,
+      score: 9.5,
       keywords: ["dynamic amoled 2x"],
     },
-    { type: "Dynamic AMOLED", score: 8.5, keywords: ["dynamic amoled"] },
+    {
+      type: "Dynamic AMOLED",
+      score: 9.2,
+      keywords: ["dynamic amoled"],
+    },
     {
       type: "Super AMOLED Plus",
-      score: 8.3,
+      score: 9.0,
       keywords: ["super amoled plus"],
     },
-    { type: "Super AMOLED", score: 8, keywords: ["super amoled"] },
-    { type: "Fluid AMOLED", score: 8, keywords: ["fluid amoled"] },
-
-    { type: "Flexible OLED", score: 7.7, keywords: ["flexible oled"] },
-    { type: "P-OLED", score: 7.2, keywords: ["p-oled", "poled", "p oled"] },
-    { type: "AMOLED", score: 7, keywords: ["amoled"] },
-    { type: "OLED", score: 6, keywords: ["oled"] },
-
     {
-      type: "Mini-LED LCD",
-      score: 5,
-      keywords: ["mini-led lcd", "mini led lcd", "mini-led"],
+      type: "Super AMOLED",
+      score: 8.8,
+      keywords: ["super amoled"],
     },
-    { type: "LTPS LCD", score: 4, keywords: ["ltps lcd"] },
-    { type: "PLS LCD", score: 3.2, keywords: ["pls lcd"] },
-    { type: "IPS LCD", score: 3, keywords: ["ips lcd"] },
-    { type: "TFT LCD", score: 2, keywords: ["tft lcd", "tft"] },
-    { type: "STN LCD", score: 1, keywords: ["stn lcd", "stn"] },
-
-    { type: "LCD", score: 1.5, keywords: ["lcd"] },
+    {
+      type: "Fluid AMOLED",
+      score: 8.8,
+      keywords: ["fluid amoled", "hyperglow"],
+    },
+    {
+      type: "P-OLED",
+      score: 8.4,
+      keywords: ["p-oled", "poled", "p oled"],
+    },
+    {
+      type: "AMOLED",
+      score: 8.0,
+      keywords: ["amoled"],
+    },
+    {
+      type: "OLED",
+      score: 7.5,
+      keywords: ["oled"],
+    },
+    {
+      type: "IPS LCD",
+      score: 6.0,
+      keywords: ["ips lcd", "ips"],
+    },
+    {
+      type: "PLS LCD",
+      score: 5.8,
+      keywords: ["pls lcd", "pls"],
+    },
+    {
+      type: "LTPS LCD",
+      score: 5.5,
+      keywords: ["ltps lcd", "ltps"],
+    },
+    {
+      type: "TFT LCD",
+      score: 4.5,
+      keywords: ["tft lcd", "tft"],
+    },
+    {
+      type: "LCD", // Being used as static value below
+      score: 4.0,
+      keywords: ["lcd"],
+    },
   ];
 
   const cleaned = (displayDesc.type ?? "").toLowerCase();
@@ -332,6 +407,15 @@ function extractDisplay(displayDesc: any): ExtractedDisplay | null {
       }
     }
     if (displaySpes.type) break;
+  }
+
+  if (!displaySpes.type && cleaned) {
+    const fallbackType = {
+      type: "LCD",
+      score: 4.0,
+      keywords: ["lcd"],
+    };
+    displaySpes.type = { type: fallbackType.type, score: fallbackType.score };
   }
 
   const brightnessText = (
@@ -381,19 +465,40 @@ function extractCamera(camera: any): ExtractedCamera {
   return cameraSpecs;
 }
 
+// MATCH CHIP USING N-GRAM
+function matchChipV4(title: string, input: string, minScore = 0.5): boolean {
+  return score_v4(title, input) >= minScore;
+}
+
 async function extractCPU(technical: any): Promise<ExtractedTechnical> {
   const technicalSpec: ExtractedTechnical = {
     chipset: technical.chipset,
-    geekbench: {},
+    benchmark: {},
   };
   const socData = await socDataIntance.fetchSocData();
-  const chipData = socData.find((doc) => {
-    if (!doc.title) return false;
-    console.log("VAL", doc.title, technicalSpec.chipset);
-    return matchChip(doc.title, technicalSpec.chipset);
-  });
-  technicalSpec.geekbench = {
-    ...chipData?.antutu,
+  // Find the best match using score_v4 n-gram approach
+  let best: { doc: any; score: number } | null = null;
+  for (const doc of socData) {
+    if (!doc.title) continue;
+    const score = score_v4(doc.title, technicalSpec.chipset);
+    // Consider a threshold, e.g. 0.7 or pick best score > 0.6
+    if (score > 0.6 && (!best || score > best?.score)) {
+      best = { doc, score };
+    }
+  }
+  const chipData = best?.doc;
+
+  const antutu = chipData?.antutu ? { ...chipData.antutu } : null;
+
+  // Convert "Total score" to "totalScore" in breakdown
+  if (antutu?.breakdown && "Total score" in antutu.breakdown) {
+    antutu.breakdown.totalScore = antutu.breakdown["Total score"];
+    delete antutu.breakdown["Total score"];
+  }
+
+  technicalSpec.benchmark = {
+    antutu: antutu,
+    geekbench: chipData?.geekbench || null,
   };
   return technicalSpec;
 }
@@ -427,6 +532,3 @@ export async function normalizeSpecs(
 
   return result;
 }
-
-// Soft geekbench and antutu score
-// sorting algo

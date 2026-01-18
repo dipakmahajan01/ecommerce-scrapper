@@ -180,6 +180,8 @@ export function extractReleaseStatus($: cheerio.CheerioAPI): string {
   return text;
 }
 
+import dayjs from "dayjs";
+
 export function getSmartprixLifecycle(
   releaseStatus: string | null,
   releaseDateRaw: string | undefined | null
@@ -187,8 +189,9 @@ export function getSmartprixLifecycle(
   // Check release status for special keywords
   const status = (releaseStatus || "").toLowerCase();
   console.log("ReleaseStatus", releaseDateRaw, releaseStatus);
+
   if (/rumou?red/.test(status)) {
-    return "rumored"; // or a special value if you want
+    return "rumored";
   }
   if (/coming soon|comming soon|upcoming|expected/.test(status)) {
     return "upcoming";
@@ -202,36 +205,43 @@ export function getSmartprixLifecycle(
     return "unknown";
   }
 
-  // Attempt basic parsing, being forgiving of format
-  let releaseDate: Date | null = null;
+  const rawLower = releaseDateRaw.toLowerCase();
+  if (/rumou?red/.test(rawLower)) {
+    return "rumored";
+  }
+  if (/coming soon|comming soon|upcoming|expected/.test(rawLower)) {
+    return "upcoming";
+  }
 
-  // Clean up date string
-  const cleanedDate = releaseDateRaw
+  // Clean up date string for parsing with dayjs
+  const cleanedDate = rawLower
     .replace(/(\d+)(st|nd|rd|th)/gi, "$1")
     .replace(/(about|expected|released|announced|,)/gi, "")
     .trim();
 
-  // Try built-in Date parser
-  const dateFromString = Date.parse(cleanedDate);
-  if (!isNaN(dateFromString)) {
-    releaseDate = new Date(dateFromString);
-  }
-
-  if (!releaseDate || isNaN(releaseDate.getTime())) {
+  // Use dayjs for parsing
+  const releaseDay = dayjs(cleanedDate);
+  if (!releaseDay.isValid()) {
     return "unknown";
   }
 
-  // Compute age
-  const now = new Date();
-  const msInYear = 1000 * 60 * 60 * 24 * 365.25;
-  const diffYears = (now.getTime() - releaseDate.getTime()) / msInYear;
+  const now = dayjs();
 
-  if (diffYears < 0) {
+  // Compare only year and month, not day
+  if (releaseDay.isAfter(now, "month")) {
+    return "upcoming";
+  }
+
+  // Difference in total years and months
+  const diffYears = now.diff(releaseDay, "year");
+  const diffMonths = now.diff(releaseDay, "month");
+
+  if (diffYears < 0 || diffMonths < 0) {
     // Release date is in the future, treat as upcoming
     return "upcoming";
-  } else if (diffYears < 2) {
+  } else if (diffMonths <= 24) {
     return "considerable";
-  } else if (diffYears >= 2) {
+  } else if (diffMonths > 24) {
     return "outdated";
   }
 

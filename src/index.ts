@@ -16,6 +16,10 @@ import {
   populateProductDetails,
   sortProductList,
 } from "./services/smartprix-products-extractions/product-sort";
+import { testAmazonBotDetection } from "./services/amazon-bot-test";
+import { testPriceHistoryApi } from "./services/pricehistory-bot-test";
+import { extractAndSaveSmartprixPrices } from "./services/smartprix-price-extraction";
+import { extractAndSaveSmartprixImages } from "./services/smartprix-image-extraction";
 
 /**
  * Starts scraping the Smartprix mobiles page.
@@ -41,75 +45,111 @@ const color = {
 };
 
 async function startSmartprixScraping(link: string) {
-  // Color utility functions using ANSI codes
-
   let browser;
   let page;
-  let backoffMs = 5 * 60 * 1000; // Start at 5 minutes
+  let backoffMs = 5 * 60 * 1000;
   const maxFailures = 5;
-  const maxBackoffMs = 60 * 60 * 1000; // Max 1 hour
+  const maxBackoffMs = 60 * 60 * 1000;
 
   try {
     browser = await chromium.launch({ headless: false });
     page = await browser.newPage();
 
-    // Go to the Smartprix mobiles page
     color.info("Navigating to Smartprix mobiles page...");
-    // await page.goto("https://www.smartprix.com/mobiles", {
-    //   waitUntil: "domcontentloaded",
-    // });
-
     await page.goto(link, {
       waitUntil: "domcontentloaded",
     });
 
-    // Wait for initial load-more button to appear
-    const pageContent = await page.content();
-    console.log("\x1b[35m[PAGE CONTENT]\x1b[0m", pageContent);
-
     color.info("Waiting for Load More button to appear...");
-    await page.waitForSelector(".sm-load-more", { timeout: 20000 });
-
-    // Print the content of the page
+    await page
+      .waitForSelector(".sm-load-more", { timeout: 20000 })
+      .catch(() => {});
 
     let loadMoreClickable = true;
     while (loadMoreClickable && MODE === "RUNNING") {
       loopCount++;
-      color.loop(loopCount); // Print the loop number in red
+      color.loop(loopCount);
       color.info("Scrolling to Load More button...");
-      await page.$eval(".sm-load-more", (el) => el.scrollIntoView());
+      await page
+        .$eval(".sm-load-more", (el) => el.scrollIntoView())
+        .catch(() => {});
 
-      // Try to click the load more button
+      // Step 1: Click the Load More button
       try {
         color.info("Clicking Load More button...");
         await page.click(".sm-load-more", { timeout: 5000 });
       } catch (err) {
         color.warn("Load More button not clickable. Probably no more pages.");
         loadMoreClickable = false;
-        break;
       }
 
-      // Wait for API response indicating new data loaded
-      let apiLoaded = false;
+      // Step 2: WAIT for loading indicator to appear (= is loading)
       try {
-        await page.waitForResponse(
-          (response) =>
-            response.url().includes("/ui/api/page-info") &&
-            response.status() === 200,
-          { timeout: 10000 }
+        await page.waitForFunction(
+          () => {
+            const btn = document.querySelector(".sm-load-more");
+            return btn && !!btn.querySelector(".sm-loading");
+          },
+          {},
+          { timeout: 7000 }
         );
-        apiLoaded = true;
-      } catch (err) {
-        color.warn("Smartprix API did not respond in time.");
+        color.info("Loading started...");
+      } catch {
+        color.warn(
+          "sm-loading indicator did not appear after click (maybe loaded instantly or failed)"
+        );
       }
 
-      // Scroll again to bring Load More into view
-      color.info("Centering Load More button in viewport.");
-      await page.$eval(".sm-load-more", (el) =>
-        el.scrollIntoView({ behavior: "smooth", block: "center" })
-      );
+      // Step 3: WAIT for loading indicator to disappear (= loading complete)
+      let loadingCompleted = false;
+      try {
+        await page.waitForFunction(
+          () => {
+            const btn = document.querySelector(".sm-load-more");
+            return btn && !btn.querySelector(".sm-loading");
+          },
+          {},
+          { timeout: 20000 }
+        );
+        loadingCompleted = true;
+        color.info("Loading completed. Now process new products.");
+      } catch {
+        color.warn("Loading did not complete in time.");
+        loadingCompleted = await page
+          .waitForSelector(".sm-load-more", { timeout: 20000 })
+          .then((el) => loadingCompleted)
+          .catch(() => true);
+      }
 
-      // Extract product data
+      if (!loadingCompleted) {
+        failureCount++;
+        color.warn(
+          `Extracted 0 products or API error. Failure #${failureCount} (loadingCompleted=${loadingCompleted})`
+        );
+        if (failureCount >= maxFailures) {
+          color.error(
+            `Reached ${maxFailures} consecutive failures. Backing off for ${Math.round(
+              backoffMs / 60000
+            )} minutes...`
+          );
+          await new Promise((resolve) => setTimeout(resolve, backoffMs));
+          backoffMs = Math.min(backoffMs * 2, maxBackoffMs);
+          if (backoffMs === maxBackoffMs) {
+            color.error(
+              "Maximum backoff reached (1h). Stopping scraper completely."
+            );
+            MODE = "STOPPED";
+            break;
+          }
+        } else {
+          await new Promise((resolve) => setTimeout(resolve, 5000));
+        }
+        continue;
+      }
+      failureCount = 0;
+      backoffMs = 5 * 60 * 1000;
+
+      // Step 4: Process new products
       let products: { link: string; title: string }[] = [];
       try {
         products = await page.$$eval(
@@ -133,103 +173,47 @@ async function startSmartprixScraping(link: string) {
         color.error("Extraction error: DOM parsing failed.");
       }
 
-      // Handle failures: products missing or API not loaded
-      if (!apiLoaded || products.length === 0) {
-        failureCount++;
-        color.warn(
-          `Extracted 0 products or API error. Failure #${failureCount} (apiLoaded=${apiLoaded}, products=${products.length})`
-        );
-
-        if (failureCount >= maxFailures) {
-          color.error(
-            `Reached ${maxFailures} consecutive failures. Backing off for ${Math.round(
-              backoffMs / 60000
-            )} minutes...`
-          );
-          await new Promise((resolve) => setTimeout(resolve, backoffMs));
-          backoffMs = Math.min(backoffMs * 2, maxBackoffMs);
-          if (backoffMs === maxBackoffMs) {
-            color.error(
-              "Maximum backoff reached (1h). Stopping scraper completely."
-            );
-            MODE = "STOPPED";
-            break;
-          }
-        } else {
-          // Short retry
-          await new Promise((resolve) => setTimeout(resolve, 5000));
-        }
-        continue;
+      if (products.length === 0) {
+        color.warn("Extracted 0 products after loading, skipping DB write.");
       } else {
-        if (failureCount > 0) {
-          color.success(
-            `Scraper successfully recovered after ${failureCount} failures!`
-          );
-        }
-        failureCount = 0;
-        backoffMs = 5 * 60 * 1000; // Reset to 5min after success
-      }
-
-      color.success(`Extracted ${products.length} products, writing to DB...`);
-
-      try {
-        // Must be bulk operation: use bulkWrite to insert/update many documents in a single operation
-        const bulkOps = products.map((p) => ({
-          updateOne: {
-            filter: { link: p.link },
-            update: {
-              $set: {
-                brand: "Samsung", // update if exists
+        try {
+          const bulkOps = products.map((p) => ({
+            updateOne: {
+              filter: { link: p.link },
+              update: {
+                $set: { brand: "cmf" },
+                $setOnInsert: {
+                  link: p.link,
+                  title: p.title,
+                  success: true,
+                },
               },
-              $setOnInsert: {
-                link: p.link,
-                title: p.title,
-                success: true, // only on new doc
-              },
+              upsert: true,
             },
-            upsert: true,
-          },
-        }));
+          }));
 
-        if (bulkOps.length) {
           await smartPrixResponse.bulkWrite(bulkOps, { ordered: false });
+          color.success(`Saved ${products.length} products to DB.`);
+        } catch (err: any) {
+          color.error(`DB error: ${err && err.message ? err.message : err}`);
         }
-
-        color.success(`Saved ${products.length} products to DB.`);
-      } catch (err: any) {
-        color.error(`DB error: ${err && err.message ? err.message : err}`);
-        failureCount++;
-        if (failureCount >= maxFailures) {
-          color.error(
-            `DB failures reached limit (${maxFailures}). Backing off for ${Math.round(
-              backoffMs / 60000
-            )} minutes...`
-          );
-          await new Promise((resolve) => setTimeout(resolve, backoffMs));
-          backoffMs = Math.min(backoffMs * 2, maxBackoffMs);
-          if (backoffMs === maxBackoffMs) {
-            color.error(
-              "Maximum backoff reached (1h). Stopping scraper completely."
-            );
-            MODE = "STOPPED";
-            break;
-          }
-        }
-        continue;
       }
 
+      // Step 5: Wait before next loop
       const waitTime = 10000 + Math.random() * 10000;
       color.info(
         `Human wait time before next load: ${Math.round(waitTime / 1000)}s`
       );
       await page.waitForTimeout(waitTime);
 
-      // Check if Load More still available
+      // Step 6: Check if Load More button is still present and not loading
       loadMoreClickable = await page
         .$eval(
           ".sm-load-more",
           (el: HTMLElement) =>
-            !el.hasAttribute("disabled") && el.offsetParent !== null
+            !el.hasAttribute("disabled") &&
+            el.offsetParent !== null &&
+            !el.querySelector(".sm-loading")
         )
         .catch(() => false);
 
@@ -374,7 +358,8 @@ async function fetchAndStoreHtmlSmartprix({
       .find({
         link: { $exists: true },
         html: { $exists: false },
-        brand: "Samsung",
+        brand: { $exists: true },
+        // brand: "apple",
       })
       .lean();
 
@@ -495,6 +480,8 @@ async function fetchAndStoreHtmlSmartprix({
 }
 
 dotenv.config();
+
+console.log(process.env.MONGODB_URI);
 
 const LIST_API = "https://www.smartprix.com/ui/api/page-info";
 // const PAGE_SIZE = 20;
@@ -673,15 +660,20 @@ app.use(express.json());
 // });
 // === END ADD ===
 // START
+let running = false;
 app.get("/start", async (req, res) => {
-  // if (running)
-  //   return res.status(400).json({ ok: false, msg: "already running" });
+  if (running)
+    return res.status(400).json({ ok: false, msg: "already running" });
   // currentAfter = 0;
-  // running = true;
+  running = true;
   // scraperLoop().catch((err) => console.error("loop crash:", err));
   failureCount = 0;
-  startSmartprixScraping("https://www.smartprix.com/mobiles/samsung-brand");
-  // fetchAndStoreHtmlSmartprix({ contextsCount: 3, maxDelay: 4, minDelay: 1 });
+  // startSmartprixScraping("https://www.smartprix.com/mobiles/cmf-brand");
+  fetchAndStoreHtmlSmartprix({
+    contextsCount: 3,
+    // maxDelay: 5000,
+    // minDelay: 7000,
+  });
   MODE = "RUNNING";
   res.json({ ok: true, msg: "started" });
 });
@@ -715,18 +707,22 @@ app.get("/status", async (req, res) => {
     lastError: last?.error ?? null,
   });
 });
-
+//
 async function extractAndSaveSmartprixParsedSpecs() {
   // Get all docs with html not null/missing, and where parseHtmlSpec is missing
   const cursor = smartPrixResponse
     .find({
-      brand: "Samsung",
-      "normalizedSpecs.error": { $exists: true },
-      $or: [
-        { "parseHtmlSpec.meta.lifecycle": "considerable" },
-        { "parseHtmlSpec.meta.lifecycle": "unknown" },
-        // { "parseHtmlSpec.meta.lifecycle": "outdated" },
-      ],
+      // brand: "Samsung",
+      html: { $exists: true },
+      // parseHtmlSpec: {
+      //   $exists: false,
+      // },
+      // "normalizedSpecs.error": { $exists: false },
+      // $or: [
+      //   { "parseHtmlSpec.meta.lifecycle": "considerable" },
+      //   { "parseHtmlSpec.meta.lifecycle": "unknown" },
+      // { "parseHtmlSpec.meta.lifecycle": "outdated" },
+      // ],
     })
     .cursor();
   let counter = 0;
@@ -734,15 +730,15 @@ async function extractAndSaveSmartprixParsedSpecs() {
     try {
       // Log which document is being processed
       color.info(
-        `Processing doc: _id=${doc._id} model=${doc.title || "?"} link=${
-          doc.link || "?"
-        }`
+        `Processing doc: _id=${doc._id.toString()} model=${
+          doc.title || "?"
+        } link=${doc.link || "?"}`
       );
 
       // "html" can be quite large
       const html = doc.html;
-      const brand = doc.brand || "Samsung";
-      if (!html || typeof html !== "string") {
+      const brand = doc.brand;
+      if (!html || typeof html !== "string" || !brand) {
         color.warn(
           `Doc ID ${doc._id}: Missing or invalid HTML, cannot parse specs.`
         );
@@ -782,28 +778,34 @@ async function normalizeSpecsAndSave() {
   // Only consider docs where "parseHtmlSpec" exists
   const cursor = smartPrixResponse
     .find({
-      brand: "Samsung",
-      "normalizedSpecs.error": { $exists: true },
-      $or: [
-        { "parseHtmlSpec.meta.lifecycle": "considerable" },
-        { "parseHtmlSpec.meta.lifecycle": "unknown" },
-        { "parseHtmlSpec.meta.lifecycle": "outdated" },
-      ],
+      // brand: "Samsung",
+      _id: { $in: [
+        "693dbd6e4e5375dc55820d52",
+        "693dbded4e5375dc55820ddf",
+        "69593840a86f27745064c63e"
+      ]},
+      html: { $exists: true },
+      parseHtmlSpec: { $exists: true },
+      // normalizedSpecs: { $exists: false },
+      "parseHtmlSpec.meta.lifecycle": {
+        $in: ["unknown", "considerable"],
+      },
+      // "normalizedSpecs.error": { $exists: false },
+      // $or: [
+      //   { "parseHtmlSpec.meta.lifecycle": "considerable" },
+      //   { "parseHtmlSpec.meta.lifecycle": "unknown" },
+      //   { "parseHtmlSpec.meta.lifecycle": "outdated" },
+      // ],
     })
     .cursor();
   let counter = 0;
-  let shouldBreak = false;
   for (let doc = await cursor.next(); doc != null; doc = await cursor.next()) {
-    if (shouldBreak) {
-      break;
-    }
-    shouldBreak = true;
     try {
       // Log which document is being processed
       color.info(
-        `Processing doc: _id=${doc._id} model=${doc.title || "?"} link=${
-          doc.link || "?"
-        }`
+        `Processing doc: _id=${doc._id.toString()} model=${
+          doc.title || "?"
+        } link=${doc.link || "?"}`
       );
 
       // Check for already present parseHtmlSpec in db
@@ -847,7 +849,13 @@ async function normalizeSpecsAndSave() {
 // Example route handler to trigger this operation manually:
 app.post("/extract-parsed-specs", async (req, res) => {
   // const count = await normalizeSpecsAndSave();
-  const count = await extractAndSaveSmartprixParsedSpecs();
+  // const count = await extractAndSaveSmartprixParsedSpecs();
+  const count = await extractAndSaveSmartprixPrices();
+  res.json({ ok: true, processed: count });
+});
+
+app.post("/extract-images", async (req, res) => {
+  const count = await extractAndSaveSmartprixImages();
   res.json({ ok: true, processed: count });
 });
 
@@ -910,6 +918,31 @@ app.get("/exe", async (req, res) => {
   const results = await sortProductList(productsWithDetails.enrichedList);
 
   return res.json(results);
+});
+
+app.get("/test-amazon-bot", async (req, res) => {
+  try {
+    res.json({ ok: true, msg: "Amazon bot test started" });
+    testAmazonBotDetection().catch((err: any) => {
+      color.error(`Amazon bot test error: ${err?.message || err}`);
+    });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err?.message || String(err) });
+  }
+});
+
+app.get("/test-pricehistory-api", async (req, res) => {
+  try {
+    res.json({
+      ok: true,
+      msg: "PriceHistory API test started (500 requests in 10 minutes)",
+    });
+    testPriceHistoryApi().catch((err: any) => {
+      color.error(`PriceHistory API test error: ${err?.message || err}`);
+    });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err?.message || String(err) });
+  }
 });
 
 export default app;
