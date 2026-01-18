@@ -8,6 +8,7 @@ import {
   TrackingData,
 } from "src/service/productRelevanceEngine/types";
 import { UserQueryModel } from "../models/userQuery";
+import { applyProductFilters } from "../service/productRelevanceEngine/filters";
 
 export const getProductRecommendations = async (
   req: Request,
@@ -26,7 +27,34 @@ export const getProductRecommendations = async (
   const trackingMap = new Map<string, ProductTrackingEntry>();
 
   try {
-    const parsed = await parseUserQueryWithAI(userQuery);
+    const parsedResult = await parseUserQueryWithAI(userQuery);
+
+    if (!parsedResult.success) {
+      const tracking: TrackingData = {
+        query: {
+          raw: userQuery,
+          parsed: {
+            query: "",
+            maxPrice: null,
+            minPrice: null,
+            brands: null,
+            storage: null,
+            ram: null,
+          },
+        },
+        products: Object.fromEntries(trackingMap),
+      };
+
+      return res.json({
+        success: false,
+        requiresClarification: true,
+        query: userQuery,
+        questions: parsedResult.questions,
+        tracking,
+      });
+    }
+
+    const parsed = parsedResult.parsed;
 
     const weightResult = await generateCategoryWeights(userQuery.trim());
 
@@ -56,31 +84,30 @@ export const getProductRecommendations = async (
     }
 
     const allDevices = getDeviceList() ?? [];
-    const filteredDevices = allDevices.filter((device) => {
-      if (device.price == null) return false;
-      if (parsed.minPrice != null && device.price < parsed.minPrice)
-        return false;
-      if (parsed.maxPrice != null && device.price > parsed.maxPrice)
-        return false;
-      return true;
+
+    const filteredDevices = applyProductFilters(allDevices, {
+      parsed,
+      budgetInfo: parsed.budgetInfo,
     });
 
     for (const device of filteredDevices) {
-      trackingMap.set(device.title, {
-        details: {
-          title: device.title,
-          price: device.price,
-          link: device.link,
-          brand: device.brand,
-        },
-      });
+      if (!trackingMap.has(device.title)) {
+        trackingMap.set(device.title, {
+          details: {
+            title: device.title,
+            price: device.price,
+            link: device.link,
+            brand: device.brand,
+            budgetInfo: parsed.budgetInfo,
+          },
+        });
+      }
     }
 
     const allProducts = filteredDevices.map((device) => ({
       ...device,
       realTitle: device.title,
-      flipkartLink: null,
-      flipkartImage: null,
+      images: device.images || [],
       dbRecordId: device._id,
     }));
 
@@ -148,10 +175,11 @@ export const getProductRecommendations = async (
       id: savedId,
       query: userQuery,
       weights: weightResult.weights,
+      budgetInfo: parsed.budgetInfo,
       products: topProducts,
       format: topProducts.map((item) => ({
         title: item.title,
-        link: item.flipkartLink,
+        link: item.link,
         score: item.totalWeightedScore,
       })),
       count: topProducts.length,

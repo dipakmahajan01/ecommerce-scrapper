@@ -266,21 +266,11 @@ export class DisplayQualityProcessor extends BaseCategoryProcessor {
 
     const displayObj = display as {
       type?: { score?: unknown };
-      ppi?: { value: unknown } | null;
-      refreshRate?: { value: unknown } | null;
-      brightness?: { value: unknown } | null;
     };
 
     const hasTypeScore = this.isValidNumber(displayObj.type?.score);
-    const hasPpiValue = this.isValidNumber(displayObj.ppi?.value);
-    const hasRefreshRateValue = this.isValidNumber(
-      displayObj.refreshRate?.value
-    );
-    const hasBrightnessValue = this.isValidNumber(displayObj.brightness?.value);
 
-    return (
-      hasTypeScore && hasPpiValue && hasRefreshRateValue && hasBrightnessValue
-    );
+    return hasTypeScore;
   }
 
   private readonly displaySchema = z.any().refine(
@@ -289,8 +279,7 @@ export class DisplayQualityProcessor extends BaseCategoryProcessor {
       return this.hasRequiredDisplayFields(display);
     },
     {
-      message:
-        "Display must have type.score, ppi.value, refreshRate.value, and brightness.value as valid numbers",
+      message: "Display must have type.score as a valid number",
     }
   );
 
@@ -374,7 +363,7 @@ export class DisplayQualityProcessor extends BaseCategoryProcessor {
   process(product: SmartPrixRecord, context: NormalizationContext): number {
     const display = product.normalizedSpecs.extracted.display;
 
-    // Display type score (normalize from its range to 0-1)
+    // Display type score (required - normalize from its range to 0-1)
     const typeScoreRaw = display?.type?.score ?? 0;
     const typeScore = this.normalizeValue(
       typeScoreRaw,
@@ -382,6 +371,7 @@ export class DisplayQualityProcessor extends BaseCategoryProcessor {
       context.displayType.max
     );
 
+    // Optional fields: if missing, normalizeValue returns 0 (neutral contribution)
     // PPI score
     const ppiScore = this.normalizeValue(
       display?.ppi?.value,
@@ -415,9 +405,9 @@ export class DisplayQualityProcessor extends BaseCategoryProcessor {
     // Type: 30%, PPI: 25%, Refresh Rate: 20%, Brightness: 15%, HDR: 10%
     // All components are already normalized 0-1, so result will be 0-1
     const combinedScore =
-      typeScore * 0.3 +
-      ppiScore * 0.25 +
-      refreshRateScore * 0.2 +
+      typeScore * 0.5 +
+      ppiScore * 0.2 +
+      refreshRateScore * 0.15 +
       brightnessScore * 0.15;
     // +
     // hdrScore * 0.1;
@@ -738,28 +728,51 @@ export class CameraQualityProcessor extends BaseCategoryProcessor {
     );
   }
 
-  private hasMainCameraWithValidMegapixel(rearCameras: unknown): boolean {
-    if (!Array.isArray(rearCameras) || rearCameras.length === 0) {
-      return false;
+  private getLargestMegapixelCamera(
+    cameras: unknown
+  ): { megapixel: number } | null {
+    if (!Array.isArray(cameras) || cameras.length === 0) {
+      return null;
     }
 
-    const mainCamera = rearCameras.find((camera) => camera.position === "main");
+    let largestCamera: { megapixel: number } | null = null;
+    let largestMp = -1;
 
-    if (!mainCamera) {
-      return false;
+    for (const camera of cameras) {
+      if (
+        camera &&
+        typeof camera === "object" &&
+        this.isValidNumber(camera.megapixel)
+      ) {
+        const mp = camera.megapixel as number;
+        if (mp > largestMp) {
+          largestMp = mp;
+          largestCamera = camera as { megapixel: number };
+        }
+      }
     }
 
-    return this.isValidNumber(mainCamera.megapixel);
+    return largestCamera;
+  }
+
+  private hasValidCameraWithMegapixel(cameras: unknown): boolean {
+    return this.getLargestMegapixelCamera(cameras) !== null;
   }
 
   private readonly cameraSchema = z.any().refine(
     (product: SmartPrixRecord) => {
       const rearCameras =
         product.normalizedSpecs?.extracted?.camera?.rearCamera || [];
-      return this.hasMainCameraWithValidMegapixel(rearCameras);
+      const frontCameras =
+        product.normalizedSpecs?.extracted?.camera?.frontCamera || [];
+      return (
+        this.hasValidCameraWithMegapixel(rearCameras) &&
+        this.hasValidCameraWithMegapixel(frontCameras)
+      );
     },
     {
-      message: "Camera must have at least one main camera with valid megapixel",
+      message:
+        "Camera must have both rear camera and front camera with valid megapixel",
     }
   );
 
@@ -776,33 +789,23 @@ export class CameraQualityProcessor extends BaseCategoryProcessor {
     allProducts: SmartPrixRecord[]
   ): Partial<NormalizationContext> {
     const mainMpValues: number[] = [];
-    const cameraCounts: number[] = [];
+    const frontMpValues: number[] = [];
 
     allProducts.forEach((p) => {
       const rearCameras = p.normalizedSpecs.extracted.camera.rearCamera || [];
+      const frontCameras = p.normalizedSpecs.extracted.camera.frontCamera || [];
 
-      // Main camera megapixels
-      const mainCamera = rearCameras.find((c) => c.position === "main");
-      if (mainCamera?.megapixel !== undefined) {
-        mainMpValues.push(mainCamera.megapixel);
+      // Largest rear camera megapixels
+      const largestRearCamera = this.getLargestMegapixelCamera(rearCameras);
+      if (largestRearCamera) {
+        mainMpValues.push(largestRearCamera.megapixel);
       }
 
-      // Camera count
-      // const hasUltrawide = rearCameras.some(
-      //   (c) => c.position === "ultrawide" || c.type === "ultrawide"
-      // );
-      // const hasTelephoto = rearCameras.some(
-      //   (c) => c.position === "telephoto" || c.type === "telephoto"
-      // );
-      // const hasMacro = rearCameras.some(
-      //   (c) => c.position === "macro" || c.type === "macro"
-      // );
-      // const cameraCount =
-      //   1 +
-      //   (hasUltrawide ? 1 : 0) +
-      //   (hasTelephoto ? 1 : 0) +
-      //   (hasMacro ? 1 : 0);
-      // cameraCounts.push(cameraCount);
+      // Largest front camera megapixels
+      const largestFrontCamera = this.getLargestMegapixelCamera(frontCameras);
+      if (largestFrontCamera) {
+        frontMpValues.push(largestFrontCamera.megapixel);
+      }
     });
 
     return {
@@ -810,44 +813,24 @@ export class CameraQualityProcessor extends BaseCategoryProcessor {
         min: mainMpValues.length > 0 ? Math.min(...mainMpValues) : 0,
         max: mainMpValues.length > 0 ? Math.max(...mainMpValues) : 1,
       },
-      // cameraCount: {
-      //   min: cameraCounts.length > 0 ? Math.min(...cameraCounts) : 1,
-      //   max: cameraCounts.length > 0 ? Math.max(...cameraCounts) : 1,
-      // },
+      cameraFrontMp: {
+        min: frontMpValues.length > 0 ? Math.min(...frontMpValues) : 0,
+        max: frontMpValues.length > 0 ? Math.max(...frontMpValues) : 1,
+      },
     };
   }
 
   process(product: SmartPrixRecord, context: NormalizationContext): number {
-    const rearCameras = product.normalizedSpecs.extracted.camera.rearCamera;
+    const rearCameras = product.normalizedSpecs.extracted.camera.rearCamera || [];
+    const frontCameras = product.normalizedSpecs.extracted.camera.frontCamera || [];
 
-    if (!rearCameras || rearCameras.length === 0) {
-      return 0;
-    }
+    // Extract largest rear camera megapixels
+    const largestRearCamera = this.getLargestMegapixelCamera(rearCameras);
+    const mainMp = largestRearCamera?.megapixel || 0;
 
-    // Extract main camera megapixels
-    const mainCamera = rearCameras.find((c) => c.position === "main");
-    const mainMp = mainCamera?.megapixel || 0;
-
-    // // Count camera types (main, ultrawide, telephoto, macro)
-    // const hasUltrawide = rearCameras.some(
-    //   (c) => c.position === "ultrawide" || c.type === "ultrawide"
-    // );
-    // const hasTelephoto = rearCameras.some(
-    //   (c) => c.position === "telephoto" || c.type === "telephoto"
-    // );
-    // const hasMacro = rearCameras.some(
-    //   (c) => c.position === "macro" || c.type === "macro"
-    // );
-
-    // const cameraCount =
-    //   1 + (hasUltrawide ? 1 : 0) + (hasTelephoto ? 1 : 0) + (hasMacro ? 1 : 0);
-
-    // // Normalize camera count
-    // const cameraCountScore = this.normalizeValue(
-    //   cameraCount,
-    //   context.cameraCount.min,
-    //   context.cameraCount.max
-    // );
+    // Extract largest front camera megapixels
+    const largestFrontCamera = this.getLargestMegapixelCamera(frontCameras);
+    const frontMp = largestFrontCamera?.megapixel || 0;
 
     // Normalize main camera megapixel
     const mainMpScore = this.normalizeValue(
@@ -856,10 +839,16 @@ export class CameraQualityProcessor extends BaseCategoryProcessor {
       context.cameraMainMp.max
     );
 
-    // Combine: Main MP (70%) + Camera Count (30%)
+    // Normalize front camera megapixel
+    const frontMpScore = this.normalizeValue(
+      frontMp,
+      context.cameraFrontMp.min,
+      context.cameraFrontMp.max
+    );
+
+    // Combine: Main MP (70%) + Front MP (30%)
     // Both are normalized 0-1, so result is guaranteed 0-1
-    const combinedScore = mainMpScore * 0.7;
-    // + cameraCountScore * 0.3;
+    const combinedScore = mainMpScore * 0.7 + frontMpScore * 0.3;
 
     return combinedScore;
   }

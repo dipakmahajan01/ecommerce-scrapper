@@ -12,7 +12,16 @@ export const getProductList = async (req: Request, res: Response) => {
   }
 
   try {
-    const parsed = await parseUserQueryWithAI(userQuery);
+    const parsedResult = await parseUserQueryWithAI(userQuery);
+
+    if (!parsedResult.success) {
+      return res.status(400).json({
+        error: "Query requires clarification",
+        questions: parsedResult.questions,
+      });
+    }
+
+    const parsed = parsedResult.parsed;
     const flipkartUrl = buildFlipkartSearchUrl(parsed);
     console.log("flipkartUrl----------------->", flipkartUrl);
 

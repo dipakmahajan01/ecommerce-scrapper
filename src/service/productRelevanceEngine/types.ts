@@ -36,11 +36,12 @@ export type SmartPrixRecord = {
   link: string;
   title: string;
   brand?: string;
-  price?: number;
+  price: number;
   success: boolean;
   html?: string;
   parseHtmlSpec: FullSpecsResult;
   normalizedSpecs: FullSpecsResult & { extracted: ExtractedSpecs };
+  images: string[];
   createdAt?: Date;
   updatedAt?: Date;
 };
@@ -234,8 +235,7 @@ export type ScrapedProduct = {
 
 export type EnrichedProduct = SmartPrixRecord & {
   realTitle: string;
-  flipkartLink: string | null;
-  flipkartImage: string | null;
+  images: string[];
   dbRecordId: string;
 };
 
@@ -243,9 +243,8 @@ export type ScoredProduct = {
   link: string;
   title: string;
   brand?: string;
-  extracted: ExtractedSpecs;
-  flipkartLink: string | null;
-  flipkartImage: string | null;
+  specs: SpecsObject;
+  images: string[];
   dbRecordId: string;
 } & ProductCategoryScores;
 
@@ -263,6 +262,7 @@ export type NormalizationContext = {
   cpuScore: { min: number; max: number };
   gpuScore: { min: number; max: number };
   cameraMainMp: { min: number; max: number };
+  cameraFrontMp: { min: number; max: number };
   // cameraCount: { min: number; max: number };
   ramCapacity: { min: number; max: number };
   romCapacity: { min: number; max: number };

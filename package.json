@@ -18,7 +18,8 @@
     "postinstall": "if-env NODE_ENV=production && npm run postinstall-production || npm run postinstall-dev || true",
     "lint": "eslint .",
     "format": "prettier --write \"{src,apps,libs,test}/**/*.ts\"",
-    "populate:devices-list": "ts-node scripts/populateDeviceList.ts"
+    "populate:devices-list": "ts-node scripts/populateDeviceList.ts",
+    "analyze:failures": "ts-node __test__/analyzeProcessorFailures.ts"
   },
   "keywords": [],
   "author": "",

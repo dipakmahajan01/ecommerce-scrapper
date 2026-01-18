@@ -13,7 +13,7 @@ export const getProductRecommendation = async (req: Request, res: Response) => {
   }
 
   try {
-    const userQuery = await UserQueryModel.findOne({ id }).lean();
+    const userQuery = await UserQueryModel.findById(id).lean();
 
     if (!userQuery) {
       return res.status(404).json({
@@ -23,7 +23,7 @@ export const getProductRecommendation = async (req: Request, res: Response) => {
     }
 
     const response: ProductRecommendationResponse = {
-      id: userQuery.id,
+      id: userQuery._id.toString(),
       products: userQuery.products as ProductRecommendationResponse["products"],
     };
 

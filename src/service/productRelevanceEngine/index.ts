@@ -79,8 +79,7 @@ export const getProductDetails = async (
       ? {
           ...bestMatch,
           realTitle: product.title,
-          flipkartLink: product.link || null,
-          flipkartImage: product.image || null,
+          images: bestMatch.images || [],
           dbRecordId: bestMatch._id,
         }
       : null;
