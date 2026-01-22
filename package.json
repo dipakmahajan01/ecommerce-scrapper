@@ -4,7 +4,7 @@
   "main": "index.js",
   "scripts": {
     "prebuild": "npx rimraf build",
-    "start": "node build/server.js",
+    "start": "node build/src/server.js",
     "dev": "nodemon --ignore '*.json' src/server.ts",
     "ts": "tsnd --respawn src/server.ts",
     "build": "tsc",
