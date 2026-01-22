@@ -1,5 +1,8 @@
 // =====================
 // General Spec Types
+
+import { IConversationMessage } from "src/models/userQuery";
+
 // =====================
 export type SpecSectionObject = Record<string, string>;
 export type SpecsObject = Record<string, SpecSectionObject>;
@@ -245,6 +248,7 @@ export type ScoredProduct = {
   brand?: string;
   specs: SpecsObject;
   images: string[];
+  price: number;
   dbRecordId: string;
 } & ProductCategoryScores;
 
@@ -316,4 +320,6 @@ export type TrackingData = {
 export interface ProductRecommendationResponse {
   id: string;
   products: ScoredProduct[];
+  messages: IConversationMessage[],
+  userQuery: string
 }
