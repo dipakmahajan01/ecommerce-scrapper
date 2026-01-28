@@ -166,7 +166,7 @@ export const getProductRecommendations = async (
             title: product.title,
             price: product.price,
           },
-          verdict: "NOT AVAILABLE",
+          verdict: verdict,
           afLink: {
             amazon: "",
           },
