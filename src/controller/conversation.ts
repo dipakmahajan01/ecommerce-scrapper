@@ -61,12 +61,14 @@ export const handleConversation = async (req: Request, res: Response) => {
     });
 
     const newUserMessage: ConversationMessage = {
+      type: "text",
       role: "user",
       content: userMessage,
       timestamp: new Date(),
     };
 
     const newAssistantMessage: ConversationMessage = {
+      type: "text",
       role: "assistant",
       content: assistantResponse,
       timestamp: new Date(),

@@ -26,28 +26,36 @@ export function filterByPrice(
   devicePrice: number,
   options: PriceFilterOptions
 ): PriceFilterResult {
-  if (options.minPrice !== null && devicePrice < options.minPrice) {
+  const {
+    maxPrice = 0,
+    minPrice = 0,
+    budgetInfo
+  } = options ?? {};
+
+  if (minPrice !== null && devicePrice < minPrice) {
     return {
       passed: false,
       reason: `Price ${devicePrice} is below minimum ${options.minPrice}`,
     };
   }
 
-  let effectiveMaxPrice: number | undefined;
+  if (!maxPrice) {
+    return {
+      passed: false,
+      reason: `Provide the max price`,
+    };
+  }
 
-  if (options.budgetInfo) {
-    const { budget, extensionAmount } = options.budgetInfo;
+  let effectiveMaxPrice: number = maxPrice;
+
+  if (budgetInfo) {
+    const { budget, extensionAmount } = budgetInfo;
     effectiveMaxPrice = calculateEffectiveMaxPrice(budget, extensionAmount);
   }
 
-  const maxPriceLimit =
-    options.maxPrice !== null && effectiveMaxPrice !== undefined
-      ? Math.min(options.maxPrice, effectiveMaxPrice)
-      : options.maxPrice !== null
-        ? options.maxPrice
-        : effectiveMaxPrice;
+  const maxPriceLimit = Math.max(maxPrice, effectiveMaxPrice);
 
-  if (maxPriceLimit !== undefined && devicePrice > maxPriceLimit) {
+  if (devicePrice > maxPriceLimit) {
     return {
       passed: false,
       reason: `Price ${devicePrice} exceeds maximum limit ${maxPriceLimit}`,

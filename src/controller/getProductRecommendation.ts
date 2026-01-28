@@ -24,8 +24,8 @@ export const getProductRecommendation = async (req: Request, res: Response) => {
 
     const response: ProductRecommendationResponse = {
       id: userQuery._id.toString(),
-      products: userQuery.products as ProductRecommendationResponse["products"],
-      userQuery: userQuery.query,
+      // products: userQuery.products as ProductRecommendationResponse["products"],
+      // userQuery: userQuery.query,
       messages: userQuery.messages ?? []
     };
 

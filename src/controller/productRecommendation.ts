@@ -2,12 +2,13 @@ import { Request, Response } from "express";
 import { getDeviceList } from "../service/getDeviceData";
 import { scoreAndRankProductList } from "../service/productRelevanceEngine";
 import { generateCategoryWeights } from "../service/ai/weightGenerator";
+import { generateProductVerdict } from "../service/ai/productVerdict";
 import { parseUserQueryWithAI } from "../helpers/aiParser";
 import {
   ProductTrackingEntry,
   TrackingData,
 } from "src/service/productRelevanceEngine/types";
-import { UserQueryModel } from "../models/userQuery";
+import { UserQueryModel, IConversationMessage } from "../models/userQuery";
 import { applyProductFilters } from "../service/productRelevanceEngine/filters";
 
 export const getProductRecommendations = async (
@@ -137,15 +138,54 @@ export const getProductRecommendations = async (
     const topProducts = scoreAndRankProductList(
       allProducts,
       weightResult.weights,
-      20,
+      8,
       trackingMap
     );
+
+    const initialUserMessage: IConversationMessage = {
+      type: "text",
+      role: "user",
+      content: userQuery,
+      timestamp: new Date(),
+    };
+
+    const productViewMessages: IConversationMessage[] = await Promise.all(
+      topProducts.map(async (product) => {
+        const verdict = await generateProductVerdict({
+          weights: weightResult.weights,
+          userQuery,
+          product,
+        });
+
+        return {
+          type: "product-view" as const,
+          role: "assistant" as const,
+          product: {
+            images: product.images,
+            specs: product.specs,
+            title: product.title,
+            price: product.price,
+          },
+          verdict: "NOT AVAILABLE",
+          afLink: {
+            amazon: "",
+          },
+          timestamp: new Date(),
+        };
+      })
+    );
+
+    const messages: IConversationMessage[] = [
+      initialUserMessage,
+      ...productViewMessages,
+    ];
 
     let savedId: string | null = null;
     try {
       const savedQuery = await UserQueryModel.create({
         query: userQuery,
         products: topProducts,
+        messages,
       });
       savedId = savedQuery._id.toString();
     } catch (saveError) {

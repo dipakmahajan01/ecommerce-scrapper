@@ -15,7 +15,7 @@ interface GenerateConversationResponseOptions {
 }
 
 function buildSystemPrompt(products: ScoredProduct[], originalQuery: string): string {
-  const productsJson = JSON.stringify(products.slice(0, 10), null, 2);
+  const productsJson = JSON.stringify(products.slice(0, 8), null, 2);
 
   return `You are a helpful tech enthusiast assistant helping users with product recommendations. You are very smart and know exactly which tone and language to use based on the user's query.
 
@@ -36,7 +36,7 @@ The user's original search query was: "${originalQuery}"
 Keep this in mind when answering questions - the products were selected based on this query, and the user's follow-up questions may relate to their original intent.
 
 ## Product Context:
-You have access to the top 10 recommended products based on the user's original query. Here are the products in JSON format:
+You have access to the top 8 recommended products based on the user's original query. Here are the products in JSON format:
 
 \`\`\`json
 ${productsJson}
@@ -77,12 +77,27 @@ export async function generateConversationResponse({
 
   const systemPrompt = buildSystemPrompt(products, originalQuery);
 
+  const textMessages = messageHistory
+    .map((msg) => {
+      if (msg.type === "text") {
+        return {
+          role: msg.role,
+          content: msg.content,
+        };
+      }
+      if (msg.type === "product-view") {
+        return {
+          role: "assistant" as const,
+          content: `Product: ${msg.product.title}\nVerdict: ${msg.verdict}`,
+        };
+      }
+      return null;
+    })
+    .filter((msg): msg is NonNullable<typeof msg> => msg !== null);
+
   const messages = [
     { role: "system" as const, content: systemPrompt },
-    ...messageHistory.map((msg) => ({
-      role: msg.role as "user" | "assistant",
-      content: msg.content,
-    })),
+    ...textMessages,
     { role: "user" as const, content: userMessage },
   ];
 
