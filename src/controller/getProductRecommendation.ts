@@ -3,30 +3,31 @@ import { UserQueryModel } from "../models/userQuery";
 import { ProductRecommendationResponse } from "../service/productRelevanceEngine/types";
 
 export const getProductRecommendation = async (req: Request, res: Response) => {
-  const id = req.params.id as string;
+  const threadId = (req.query.threadId as string) || req.params.id;
 
-  if (!id || id.trim().length === 0) {
+  if (!threadId || threadId.trim().length === 0) {
     return res.status(400).json({
       success: false,
-      error: "Missing 'id' parameter in request path.",
+      error: "Missing 'threadId' parameter in request query or path.",
     });
   }
 
   try {
-    const userQuery = await UserQueryModel.findById(id).lean();
+    const userQuery = await UserQueryModel.findOne({ threadId }).lean();
 
-    if (!userQuery) {
-      return res.status(404).json({
-        success: false,
-        error: `No recommendation found with id: ${id}`,
-      });
-    }
+    // if (!userQuery) {
+    //   return res.status(404).json({
+    //     success: false,
+    //     error: `No recommendation found with threadId: ${threadId}`,
+    //   });
+    // }
 
     const response: ProductRecommendationResponse = {
-      id: userQuery._id.toString(),
+      // id: userQuery._id.toString(),
+      threadId: userQuery?.threadId || threadId,
       // products: userQuery.products as ProductRecommendationResponse["products"],
       // userQuery: userQuery.query,
-      messages: userQuery.messages ?? []
+      messages: userQuery?.messages ?? []
     };
 
     return res.json(response);

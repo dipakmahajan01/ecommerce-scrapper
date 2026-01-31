@@ -318,7 +318,8 @@ export type TrackingData = {
 // =====================
 
 export interface ProductRecommendationResponse {
-  id: string;
+  // id: string;
+  threadId: string;
   // products: ScoredProduct[];
   messages: IConversationMessage[],
   // userQuery: string

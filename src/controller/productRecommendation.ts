@@ -11,7 +11,7 @@ import {
 import { UserQueryModel, IConversationMessage } from "../models/userQuery";
 import { applyProductFilters } from "../service/productRelevanceEngine/filters";
 
-export const getProductRecommendations = async (
+export const generateProductGeneration = async (
   req: Request,
   res: Response
 ) => {
@@ -149,7 +149,7 @@ export const getProductRecommendations = async (
       timestamp: new Date(),
     };
 
-    const productViewMessages: IConversationMessage[] = await Promise.all(
+    const productsWithVerdicts = await Promise.all(
       topProducts.map(async (product) => {
         const verdict = await generateProductVerdict({
           weights: weightResult.weights,
@@ -158,31 +158,37 @@ export const getProductRecommendations = async (
         });
 
         return {
-          type: "product-view" as const,
-          role: "assistant" as const,
-          product: {
-            images: product.images,
-            specs: product.specs,
-            title: product.title,
-            price: product.price,
-          },
+          images: product.images,
+          specs: product.specs,
+          title: product.title,
+          price: product.price,
           verdict: verdict,
-          afLink: {
-            amazon: "",
-          },
-          timestamp: new Date(),
+          link: product.link,
+          brand: product.brand,
+          dbRecordId: product.dbRecordId,
         };
       })
     );
 
+    const productViewMessage: IConversationMessage = {
+      type: "product-view",
+      role: "assistant",
+      products: productsWithVerdicts,
+      content: "I found these product recommendations for you.",
+      timestamp: new Date(),
+    };
+
     const messages: IConversationMessage[] = [
       initialUserMessage,
-      ...productViewMessages,
+      productViewMessage,
     ];
 
     let savedId: string | null = null;
+    const threadId = (req.body?.threadId as string) || undefined;
+
     try {
       const savedQuery = await UserQueryModel.create({
+        threadId: threadId || `thread_${Date.now()}_${Math.random().toString(36).substring(7)}`,
         query: userQuery,
         products: topProducts,
         messages,
@@ -210,9 +216,12 @@ export const getProductRecommendations = async (
       products: Object.fromEntries(trackingMap),
     };
 
+    const createdQuery = savedId ? await UserQueryModel.findById(savedId) : null;
+
     return res.json({
       success: true,
       id: savedId,
+      threadId: createdQuery?.threadId || threadId || savedId,
       query: userQuery,
       weights: weightResult.weights,
       budgetInfo: parsed.budgetInfo,

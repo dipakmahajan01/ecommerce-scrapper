@@ -10,16 +10,17 @@ export type TextMessage = {
 
 export type ProductViewMessage = {
   type: "product-view";
-  product: {
+  products: Array<{
     images: string[];
     specs: Record<string, Record<string, string>>;
     title: string;
     price: number;
-  };
-  verdict: string;
-  afLink: {
-    amazon: string;
-  };
+    verdict: string;
+    link: string;
+    brand?: string;
+    dbRecordId: string;
+  }>;
+  content: string;
   role: "assistant";
   timestamp: Date;
 };
@@ -27,6 +28,7 @@ export type ProductViewMessage = {
 export type IConversationMessage = TextMessage | ProductViewMessage;
 
 export interface IUserQuery {
+  threadId: string;
   query: string;
   products: ScoredProduct[];
   messages?: IConversationMessage[];
@@ -40,20 +42,19 @@ const ConversationMessageSchema = new Schema<IConversationMessage>(
     role: { type: String, enum: ["user", "assistant"], required: true },
     timestamp: { type: Date, default: Date.now },
     content: { type: String, required: false },
-    product: {
-      type: {
-        images: [String],
-        specs: Schema.Types.Mixed,
-        title: String,
-        price: Number,
-      },
-      required: false,
-    },
-    verdict: { type: String, required: false },
-    afLink: {
-      type: {
-        amazon: String,
-      },
+    products: {
+      type: [
+        {
+          images: [String],
+          specs: Schema.Types.Mixed,
+          title: String,
+          price: Number,
+          verdict: String,
+          link: String,
+          brand: String,
+          dbRecordId: String,
+        },
+      ],
       required: false,
     },
   },
@@ -62,6 +63,7 @@ const ConversationMessageSchema = new Schema<IConversationMessage>(
 
 const UserQuerySchema = new Schema<IUserQuery>(
   {
+    threadId: { type: String, required: true, index: true },
     query: { type: String, required: true },
     products: { type: Schema.Types.Mixed, required: true },
     messages: { type: [ConversationMessageSchema], default: [] },
